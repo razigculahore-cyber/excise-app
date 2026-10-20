@@ -66,38 +66,36 @@ def _row_to_dict(row) -> dict:
 
 
 def count_for(user_id: int) -> int:
-    return get_db().execute("SELECT COUNT(*) FROM estimates WHERE user_id = ?", (user_id,)).fetchone()[0]
+    return get_db().execute(
+        "SELECT COUNT(*) AS n FROM estimates WHERE user_id = %s", (user_id,)).fetchone()["n"]
 
 
 def list_for(user_id: int, limit: int | None = None) -> list[dict]:
-    sql = "SELECT * FROM estimates WHERE user_id = ? ORDER BY id DESC"
+    sql = "SELECT * FROM estimates WHERE user_id = %s ORDER BY id DESC"
     params: tuple = (user_id,)
     if limit:
-        sql += " LIMIT ?"
+        sql += " LIMIT %s"
         params += (limit,)
     return [_row_to_dict(r) for r in get_db().execute(sql, params).fetchall()]
 
 
 def get_for(user_id: int, estimate_id: int) -> dict | None:
     row = get_db().execute(
-        "SELECT * FROM estimates WHERE id = ? AND user_id = ?", (estimate_id, user_id)).fetchone()
+        "SELECT * FROM estimates WHERE id = %s AND user_id = %s", (estimate_id, user_id)).fetchone()
     return _row_to_dict(row) if row else None
 
 
 def create(user_id: int, data: dict) -> int:
     if count_for(user_id) >= current_app.config["MAX_SAVED_ESTIMATES"]:
         raise TooManyEstimates()
-    db = get_db()
-    cur = db.execute(
-        "INSERT INTO estimates (user_id, title, summary, total, inputs, lines) VALUES (?, ?, ?, ?, ?, ?)",
+    row = get_db().execute(
+        "INSERT INTO estimates (user_id, title, summary, total, inputs, lines)"
+        " VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
         (user_id, data["title"], data["summary"], data["total"],
-         json.dumps(data["inputs"]), json.dumps(data["lines"])))
-    db.commit()
-    return cur.lastrowid
+         json.dumps(data["inputs"]), json.dumps(data["lines"]))).fetchone()
+    return row["id"]
 
 
 def delete_for(user_id: int, estimate_id: int) -> bool:
-    db = get_db()
-    cur = db.execute("DELETE FROM estimates WHERE id = ? AND user_id = ?", (estimate_id, user_id))
-    db.commit()
+    cur = get_db().execute("DELETE FROM estimates WHERE id = %s AND user_id = %s", (estimate_id, user_id))
     return cur.rowcount > 0

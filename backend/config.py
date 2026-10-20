@@ -7,6 +7,14 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INSTANCE_DIR = os.path.join(BASE_DIR, "instance")
 FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
 
+try:
+    # On your computer, settings such as DATABASE_URL come from .env (never committed).
+    # python-dotenv is a dev-only package; on Vercel the variables are set in the dashboard.
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(BASE_DIR, ".env"))
+except ImportError:
+    pass
+
 
 def _flag(name: str, default: bool) -> bool:
     value = os.environ.get(name)
@@ -29,7 +37,10 @@ def load_secret_key(instance_dir: str) -> str:
 def build_config(instance_dir: str = INSTANCE_DIR) -> dict:
     return {
         "SECRET_KEY": os.environ.get("SECRET_KEY") or load_secret_key(instance_dir),
-        "DATABASE": os.path.join(instance_dir, "users.db"),
+        # PostgreSQL connection string (Neon). Never hard-code it; set it in .env or on Vercel.
+        "DATABASE_URL": os.environ.get("DATABASE_URL", ""),
+        # Times are stored in UTC and shown in this zone
+        "APP_TIMEZONE": os.environ.get("APP_TIMEZONE", "Asia/Karachi"),
         "SESSION_COOKIE_HTTPONLY": True,
         "SESSION_COOKIE_SAMESITE": "Lax",
         # Set HTTPS=1 when the app is served over https (e.g. online hosting)

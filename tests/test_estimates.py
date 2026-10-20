@@ -1,5 +1,6 @@
-from backend.db import get_db
 from conftest import ESTIMATE
+
+from backend.db import get_db
 
 
 def test_api_requires_login(browser):
@@ -59,5 +60,5 @@ def test_deleting_user_removes_their_estimates(app, make_browser, admin):
     admin.post(f"/admin/users/{uid}/delete")
     with app.app_context():
         db = get_db()
-        assert db.execute("SELECT COUNT(*) FROM users WHERE id = ?", (uid,)).fetchone()[0] == 0
-        assert db.execute("SELECT COUNT(*) FROM estimates WHERE user_id = ?", (uid,)).fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) AS n FROM users WHERE id = %s", (uid,)).fetchone()["n"] == 0
+        assert db.execute("SELECT COUNT(*) AS n FROM estimates WHERE user_id = %s", (uid,)).fetchone()["n"] == 0

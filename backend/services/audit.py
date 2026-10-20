@@ -18,12 +18,11 @@ EVENT_LABELS = {
 
 
 def log(event: str, user=None, username: str = "", detail: str = "", ip: str = "") -> None:
-    db = get_db()
-    db.execute(
-        "INSERT INTO audit_log (user_id, username, event, detail, ip) VALUES (?, ?, ?, ?, ?)",
+    get_db().execute(
+        "INSERT INTO audit_log (user_id, username, event, detail, ip) VALUES (%s, %s, %s, %s, %s)",
         (user["id"] if user else None, user["username"] if user else username, event, detail[:200], ip))
-    db.commit()
 
 
 def recent(limit: int = 200):
-    return get_db().execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    return get_db().execute(
+        "SELECT * FROM audit_log ORDER BY id DESC LIMIT %s", (limit,)).fetchall()

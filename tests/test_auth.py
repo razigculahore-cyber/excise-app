@@ -41,7 +41,8 @@ def test_post_without_csrf_rejected(admin):
 
 def test_signup_gets_staff_account(make_browser, admin):
     staff = make_browser()
-    resp = staff.post("/signup", {"username": "ali", "full_name": "Ali", "password": "staffpass1", "confirm": "staffpass1"})
+    resp = staff.post("/signup", {"username": "ali", "full_name": "Ali",
+                                  "password": "staffpass1", "confirm": "staffpass1"})
     assert resp.status_code == 302
     assert staff.get("/").status_code == 200
     assert staff.get("/admin/users").status_code == 403

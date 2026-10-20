@@ -3,7 +3,7 @@ Excise Fee Estimator: Flask application factory.
 
     backend/
       config.py      settings from environment
-      db.py          SQLite connection + schema
+      db.py          PostgreSQL connection + schema
       security.py    CSRF, headers, login/admin guards
       services/      users, estimates, audit log (all SQL lives here)
       routes/        auth, main (calculator), admin, api blueprints
@@ -31,8 +31,9 @@ def create_app(overrides: dict | None = None, instance_dir: str | None = None) -
     app.config.update(cfg.build_config(instance_dir))
     if overrides:
         app.config.update(overrides)
+    if not app.config["DATABASE_URL"]:
+        raise RuntimeError("DATABASE_URL is not set. Put it in .env (see .env.example) or in the Vercel settings.")
 
-    init_db(app.config["DATABASE"])
     app.teardown_appcontext(close_db)
     app.before_request(check_csrf)
     app.after_request(security_headers)
@@ -55,6 +56,12 @@ def _register_commands(app: Flask) -> None:
     import click
 
     from .services import users
+
+    @app.cli.command("init-db")
+    def init_db_command() -> None:
+        """Create the database tables (safe to re-run; never deletes data)."""
+        init_db(app.config["DATABASE_URL"])
+        click.echo("Database tables are ready.")
 
     @app.cli.command("create-user")
     @click.argument("username")

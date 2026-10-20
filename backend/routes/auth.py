@@ -1,6 +1,5 @@
 """First-run setup, sign in, sign up, sign out and change password."""
-from flask import (Blueprint, current_app, flash, g, redirect, render_template,
-                   request, session, url_for)
+from flask import Blueprint, current_app, flash, g, redirect, render_template, request, session, url_for
 
 from ..security import client_ip, login_required, safe_next
 from ..services import audit, users
