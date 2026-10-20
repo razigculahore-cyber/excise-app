@@ -1,0 +1,15 @@
+{% extends "auth/base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block intro %}<p class="intro">Use the username and password you were given.</p>{% endblock %}
+{% block content %}
+<form method="post">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <label>Username
+    <input type="text" name="username" value="{{ username }}" autocomplete="username" autocapitalize="none" spellcheck="false" required{% if not username %} autofocus{% endif %}>
+  </label>
+  {% with name="password", label="Password", autocomplete="current-password", minlength=None, autofocus=username %}{% include "partials/password.html" %}{% endwith %}
+  <button type="submit" class="block">Sign in</button>
+</form>
+<p class="auth-switch">Forgot your password? Ask an admin to set a new one.</p>
+{% if allow_signup %}<p class="auth-switch">New here? <a href="{{ url_for('auth.signup') }}">Create an account</a></p>{% endif %}
+{% endblock %}

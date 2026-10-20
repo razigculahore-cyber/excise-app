@@ -1,0 +1,33 @@
+{% extends "app/base.html" %}
+{% block title %}Activity{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Admin</p>
+    <h1>Activity</h1>
+    <p class="sub">The latest {{ rows|length }} sign-ins and account changes, newest first.</p>
+  </div>
+</div>
+<section class="panel">
+  {% if rows %}
+  <div class="tablewrap">
+    <table class="data">
+      <thead><tr><th>When</th><th>User</th><th>Event</th><th>Detail</th><th>IP address</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td class="when">{{ r.at }}</td>
+          <td><strong>{{ r.username or '—' }}</strong></td>
+          <td><span class="pill{{ ' off' if r.event in ('login_failed', 'login_locked', 'user_deleted', 'user_disabled') else (' neutral' if r.event == 'logout' else '') }}">{{ labels.get(r.event, r.event) }}</span></td>
+          <td>{{ r.detail }}</td>
+          <td class="when">{{ r.ip }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty"><strong>No activity yet</strong></div>
+  {% endif %}
+</section>
+{% endblock %}

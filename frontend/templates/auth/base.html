@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="auth">
+  <aside class="auth-aside">
+    <a class="brand" href="{{ url_for('auth.login') }}">{% include "partials/brand.html" %}</a>
+    <div class="auth-pitch">
+      <h2>Vehicle fee estimates in seconds.</h2>
+      <p>Registration, transfer and tax amounts worked out as you type, using the current fiscal-year slabs.</p>
+      <ul class="auth-points">
+        <li>Every staff member signs in with their own account</li>
+        <li>Save estimates to your account and reopen them later</li>
+        <li>Admins manage access and see sign-in activity</li>
+      </ul>
+    </div>
+    <p class="auth-foot">Estimates only, not official challans.</p>
+  </aside>
+  <main class="auth-main">
+    <section class="auth-card">
+      <div>
+        <h1>{{ self.title() }}</h1>
+        {% block intro %}{% endblock %}
+      </div>
+      {% include "partials/flash.html" %}
+      {% block content %}{% endblock %}
+    </section>
+  </main>
+</div>
+{% endblock %}

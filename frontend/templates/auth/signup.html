@@ -1,0 +1,18 @@
+{% extends "auth/base.html" %}
+{% block title %}Create account{% endblock %}
+{% block intro %}<p class="intro">Your own login. Saved estimates are visible only to you.</p>{% endblock %}
+{% block content %}
+<form method="post">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <label>Full name
+    <input type="text" name="full_name" value="{{ form.full_name }}" autocomplete="name">
+  </label>
+  <label>Username
+    <input type="text" name="username" value="{{ form.username }}" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="40" required autofocus>
+  </label>
+  {% with name="password", label="Password (at least 8 characters)", autocomplete="new-password", minlength=8, autofocus=False %}{% include "partials/password.html" %}{% endwith %}
+  {% with name="confirm", label="Confirm password", autocomplete="new-password", minlength=8, autofocus=False %}{% include "partials/password.html" %}{% endwith %}
+  <button type="submit" class="block">Create account</button>
+</form>
+<p class="auth-switch">Already have an account? <a href="{{ url_for('auth.login') }}">Sign in</a></p>
+{% endblock %}

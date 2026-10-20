@@ -1,0 +1,70 @@
+{% extends "app/base.html" %}
+{% block title %}Users{% endblock %}
+{% block content %}
+{% set active = users|selectattr('is_active')|list|length %}
+{% set admins = users|selectattr('is_admin')|list|length %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Admin</p>
+    <h1>Users</h1>
+    <p class="sub">Give each person their own login. Disabled users are signed out immediately.</p>
+  </div>
+</div>
+
+<dl class="stats">
+  <div class="stat"><dt>Accounts</dt><dd>{{ users|length }}</dd></div>
+  <div class="stat"><dt>Active</dt><dd>{{ active }}</dd></div>
+  <div class="stat"><dt>Admins</dt><dd>{{ admins }}</dd></div>
+</dl>
+
+<section class="panel">
+  <h2>Add a user</h2>
+  <form method="post" action="{{ url_for('admin.add_user') }}" class="addform">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <label>Full name <input type="text" name="full_name" autocomplete="off"></label>
+    <label>Username <input type="text" name="username" required maxlength="40" autocomplete="off" autocapitalize="none" spellcheck="false"></label>
+    <label>Password <input type="password" name="password" minlength="{{ min_len }}" required autocomplete="new-password"></label>
+    <label class="check"><input type="checkbox" name="is_admin"> Make admin</label>
+    <button type="submit">Add user</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>{{ users|length }} account{{ '' if users|length == 1 else 's' }}</h2>
+  <div class="tablewrap">
+    <table class="data">
+      <thead><tr><th>User</th><th>Role</th><th>Status</th><th class="num">Estimates</th><th>Last sign-in</th><th>Actions</th></tr></thead>
+      <tbody>
+      {% for u in users %}
+        <tr>
+          <td><strong>{{ u.username }}</strong>{% if u.full_name %}<span class="sub">{{ u.full_name }}</span>{% endif %}</td>
+          <td><span class="pill{{ '' if u.is_admin else ' neutral' }}">{{ 'Admin' if u.is_admin else 'Staff' }}</span></td>
+          <td>{% if u.is_active %}<span class="pill">Active</span>{% else %}<span class="pill off">Disabled</span>{% endif %}</td>
+          <td class="num">{{ u.estimate_count }}</td>
+          <td class="when">{{ u.last_login or 'Never' }}</td>
+          <td>
+            <div class="acts">
+              <form method="post" action="{{ url_for('admin.user_action', uid=u.id, action='reset') }}">
+                <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+                <input type="password" name="password" placeholder="New password" minlength="{{ min_len }}" required autocomplete="new-password" aria-label="New password for {{ u.username }}">
+                <button type="submit" class="ghost small">Set</button>
+              </form>
+              {% if u.id != user.id %}
+              <form method="post" action="{{ url_for('admin.user_action', uid=u.id, action='disable' if u.is_active else 'enable') }}">
+                <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+                <button type="submit" class="ghost small">{{ 'Disable' if u.is_active else 'Enable' }}</button>
+              </form>
+              <form method="post" action="{{ url_for('admin.user_action', uid=u.id, action='delete') }}" data-confirm="Delete {{ u.username }} and their saved estimates? This cannot be undone.">
+                <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+                <button type="submit" class="danger small">Delete</button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block body %}
+<main class="page">
+  <section class="panel message-card">
+    <p class="eyebrow">Excise Fee Estimator</p>
+    <div class="page-head"><h1>{{ title }}</h1></div>
+    <p class="muted">{{ text }}</p>
+    <div class="actions"><a class="btn" href="{{ url_for('main.calculator') }}">Back to calculator</a></div>
+  </section>
+</main>
+{% endblock %}

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% macro navlink(ep, text) %}<a href="{{ url_for(ep) }}"{% if request.endpoint == ep %} aria-current="page"{% endif %}>{{ text }}</a>{% endmacro %}
+{% block body %}
+<header class="shell-head">
+  <div class="shell-head-inner">
+    <a class="brand" href="{{ url_for('main.calculator') }}">{% include "partials/brand.html" %}</a>
+    <nav class="shell-nav" aria-label="Main">
+      {{ navlink('main.calculator', 'Calculator') }}
+      {{ navlink('main.saved_estimates', 'Saved estimates') }}
+      {% if user.is_admin %}
+        <span class="sep" aria-hidden="true"></span>
+        {{ navlink('admin.user_list', 'Users') }}
+        {{ navlink('admin.activity', 'Activity') }}
+      {% endif %}
+    </nav>
+    {% set display = user.full_name or user.username %}
+    <details class="usermenu">
+      <summary aria-label="Account menu">
+        <span class="avatar" aria-hidden="true">{{ (display.split()|map('first')|join)[:2]|upper }}</span>
+        <span class="who"><strong>{{ display }}</strong><span>{{ 'Admin' if user.is_admin else 'Staff' }}</span></span>
+      </summary>
+      <div class="menu">
+        <a href="{{ url_for('auth.account') }}">Account &amp; password</a>
+        <a href="{{ url_for('main.saved_estimates') }}">My saved estimates</a>
+        <hr>
+        <form method="post" action="{{ url_for('auth.logout') }}">
+          <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+          <button type="submit">Sign out</button>
+        </form>
+      </div>
+    </details>
+  </div>
+</header>
+<main class="page {% block page_class %}{% endblock %}">
+  {% include "partials/flash.html" %}
+  {% block content %}{% endblock %}
+</main>
+{% endblock %}

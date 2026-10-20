@@ -1,0 +1,53 @@
+{% extends "app/base.html" %}
+{% block title %}Saved estimates{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Your workspace</p>
+    <h1>Saved estimates</h1>
+    <p class="sub">Only you can see these. Open one to load its inputs back into the calculator.</p>
+  </div>
+  <a class="btn" href="{{ url_for('main.calculator') }}">New estimate</a>
+</div>
+
+{% if estimates %}
+<dl class="stats">
+  <div class="stat"><dt>Saved</dt><dd>{{ estimates|length }}</dd></div>
+  <div class="stat"><dt>Latest</dt><dd class="mono">{{ estimates[0].created_at[:10] }}</dd></div>
+  <div class="stat"><dt>Largest total</dt><dd>Rs {{ '{:,.0f}'.format(estimates|map(attribute='total')|max) }}</dd></div>
+</dl>
+
+<section class="panel">
+  <h2>{{ estimates|length }} estimate{{ '' if estimates|length == 1 else 's' }}</h2>
+  <div class="tablewrap">
+    <table class="data">
+      <thead><tr><th>Estimate</th><th>Saved</th><th class="num">Total</th><th>Actions</th></tr></thead>
+      <tbody>
+      {% for e in estimates %}
+        <tr>
+          <td><strong>{{ e.title }}</strong>{% if e.summary and e.summary != e.title %}<span class="sub">{{ e.summary }}</span>{% endif %}</td>
+          <td class="when">{{ e.created_at }}</td>
+          <td class="num">Rs {{ '{:,.2f}'.format(e.total).rstrip('0').rstrip('.') }}</td>
+          <td>
+            <div class="acts">
+              <a class="btn ghost small" href="{{ url_for('main.calculator', estimate=e.id) }}">Open</a>
+              <form method="post" action="{{ url_for('main.delete_estimate', estimate_id=e.id) }}" data-confirm="Delete “{{ e.title }}”? This cannot be undone.">
+                <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+                <button type="submit" class="danger small">Delete</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% else %}
+<section class="panel empty">
+  <strong>No saved estimates yet</strong>
+  <p>Work out an estimate in the calculator, then click <em>Save estimate</em> to keep it here.</p>
+  <a class="btn" href="{{ url_for('main.calculator') }}">Open the calculator</a>
+</section>
+{% endif %}
+{% endblock %}

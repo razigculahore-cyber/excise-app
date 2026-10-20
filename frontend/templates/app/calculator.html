@@ -1,0 +1,165 @@
+{% extends "app/base.html" %}
+{% block title %}Calculator{% endblock %}
+{% block page_class %}calc-page{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Excise &amp; Taxation · vehicle fees</p>
+    <h1>Fee calculator</h1>
+    <p class="sub">Estimate the registration, transfer and tax amounts payable on a vehicle. Totals update as you type.</p>
+  </div>
+</div>
+
+{% if preload %}
+<div class="loaded-banner" role="status">
+  <span>Opened saved estimate <strong>{{ preload.title }}</strong> from {{ preload.created_at }}. Changes aren't saved until you click Save.</span>
+  <a href="{{ url_for('main.calculator') }}">Start fresh</a>
+</div>
+<script type="application/json" id="preload">{{ preload.inputs|tojson }}</script>
+{% endif %}
+
+<div class="calc" data-user="{{ user.id }}">
+  <form id="form" autocomplete="off">
+    <fieldset>
+      <legend>Transaction</legend>
+      <div class="seg" role="radiogroup" aria-label="Transaction category">
+        <input type="radio" name="txn" id="txn-new" value="new"><label for="txn-new">New registration</label>
+        <input type="radio" name="txn" id="txn-nrt" value="nrt"><label for="txn-nrt">New + transfer</label>
+        <input type="radio" name="txn" id="txn-transfer" value="transfer"><label for="txn-transfer">Transfer of ownership</label>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Vehicle</legend>
+      <div class="seg" role="radiogroup" aria-label="Vehicle type">
+        <input type="radio" name="vehicle" id="v-motorcycle" value="motorcycle"><label for="v-motorcycle">Motor cycle</label>
+        <input type="radio" name="vehicle" id="v-car" value="car"><label for="v-car">Motor car</label>
+        <input type="radio" name="vehicle" id="v-commercial" value="commercial"><label for="v-commercial">Commercial</label>
+        <input type="radio" name="vehicle" id="v-ev" value="ev"><label for="v-ev">Electric</label>
+      </div>
+      <div class="row">
+        <div class="field" id="grpMotorCycleSub">
+          <label for="motorCycleSub">Motor cycle category</label>
+          <select id="motorCycleSub"><option value="standard">Standard</option><option value="rickshaw">Rickshaw</option></select>
+        </div>
+        <div class="field" id="grpCommercialSub">
+          <label for="commercialSub">Commercial category</label>
+          <select id="commercialSub"><option value="standard">Standard commercial</option><option value="htv">HTV</option><option value="tractor">Tractor</option></select>
+        </div>
+        <div class="field" id="grpCC">
+          <label for="cc">Engine capacity (cc)</label>
+          <input type="number" id="cc" min="0" step="1" inputmode="numeric" placeholder="e.g. 1300">
+          <span class="hint"></span>
+        </div>
+        <div class="field" id="grpKW">
+          <label for="kw">Motor rating (kW)</label>
+          <input type="number" id="kw" min="0" step="0.1" inputmode="decimal" placeholder="e.g. 80">
+          <span class="hint" id="ccEquiv"></span>
+        </div>
+        <div class="field" id="grpWeight">
+          <label for="ladenWeight">Laden weight (kg)</label>
+          <input type="number" id="ladenWeight" min="0" step="1" inputmode="numeric" placeholder="e.g. 7500">
+          <span class="hint"></span>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Value</legend>
+      <div class="row">
+        <div class="field">
+          <label for="invoiceValue">Invoice value (Rs)</label>
+          <input type="number" id="invoiceValue" min="0" step="1" inputmode="numeric">
+          <span class="hint" id="invoiceHint"></span>
+        </div>
+        <div class="field">
+          <label for="advanceTax">Advance tax (Rs)</label>
+          <input type="number" id="advanceTax" min="0" step="1" inputmode="numeric">
+          <span class="hint"></span>
+        </div>
+        <div class="field">
+          <span class="lbl">Total value used</span>
+          <span class="computed" id="totalValueOut">Rs 0</span>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Owner</legend>
+      <div class="row">
+        <div class="field">
+          <span class="lbl">Tax status</span>
+          <div class="seg" role="radiogroup" aria-label="Tax status">
+            <input type="radio" name="taxStatus" id="ts-filer" value="filer"><label for="ts-filer">Filer</label>
+            <input type="radio" name="taxStatus" id="ts-non" value="nonfiler"><label for="ts-non">Non-filer</label>
+          </div>
+        </div>
+        <div class="field">
+          <label for="owner">Owner type</label>
+          <select id="owner"><option value="1st">1st owner</option><option value="2nd">2nd owner</option></select>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <span class="lbl">CVT applicable</span>
+          <div class="seg" role="radiogroup" aria-label="CVT applicable">
+            <input type="radio" name="cvt" id="cvt-yes" value="yes"><label for="cvt-yes">Yes</label>
+            <input type="radio" name="cvt" id="cvt-no" value="no"><label for="cvt-no">No</label>
+          </div>
+        </div>
+        <div class="field">
+          <span class="lbl">HPA (financed vehicle)</span>
+          <div class="seg" role="radiogroup" aria-label="HPA">
+            <input type="radio" name="hpa" id="hpa-yes" value="yes"><label for="hpa-yes">Yes</label>
+            <input type="radio" name="hpa" id="hpa-no" value="no"><label for="hpa-no">No</label>
+          </div>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Dates</legend>
+      <div class="row">
+        <div class="field">
+          <label for="invoiceDate" id="invoiceDateLabel">Invoice date</label>
+          <input type="date" id="invoiceDate">
+        </div>
+        <div class="field">
+          <label for="regDate" id="regDateLabel">Registration date</label>
+          <input type="date" id="regDate">
+        </div>
+      </div>
+    </fieldset>
+  </form>
+
+  <aside class="voucher-col" id="breakdown" aria-live="polite">
+    <ul id="warnings" hidden></ul>
+    <section class="voucher">
+      <div class="v-head">
+        <p class="eyebrow">Fee estimate</p>
+        <p id="summaryLine">—</p>
+      </div>
+      <div class="perf" aria-hidden="true"></div>
+      <div class="v-body">
+        <dl class="chips" id="chips"></dl>
+        <div class="tablewrap">
+          <table class="lines">
+            <tbody id="lines"></tbody>
+          </table>
+        </div>
+        <div class="total"><span>Total payable</span><strong id="total">Rs 0</strong></div>
+        <div class="actions">
+          <button type="button" id="saveBtn">Save estimate</button>
+          <button type="button" class="ghost" id="copyBtn">Copy breakdown</button>
+          <button type="button" class="ghost" id="printBtn">Print</button>
+          <button type="button" class="ghost" id="resetBtn">Reset to example</button>
+        </div>
+      </div>
+    </section>
+    <p class="note">An estimate only, not an official challan. Confirm final amounts with the Excise &amp; Taxation office.</p>
+  </aside>
+</div>
+
+<div class="mbar"><a href="#breakdown">See breakdown ↓</a><strong id="mobileTotal">Rs 0</strong></div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/estimator.js') }}"></script>{% endblock %}
