@@ -1,0 +1,25 @@
+{# Buttons for one account `u`. Only what can() allows is shown; the server checks again on submit. #}
+<div class="acts">
+  {% if can(user, 'reset', u) %}
+  <form method="post" action="{{ url_for('admin.user_action', uid=u.id, action='reset') }}">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    {% if back %}<input type="hidden" name="back" value="{{ back }}">{% endif %}
+    <input type="password" name="password" placeholder="New password" minlength="{{ min_len }}" required autocomplete="new-password" aria-label="New password for {{ u.username }}">
+    <button type="submit" class="ghost small">Set</button>
+  </form>
+  {% endif %}
+  {% for action, label, cls, confirm in [
+      ('promote', 'Make admin', 'ghost', 'Make ' ~ u.username ~ ' an admin? They will be able to manage normal users.'),
+      ('revoke', 'Remove admin', 'ghost', 'Remove admin rights from ' ~ u.username ~ '?'),
+      ('disable' if u.is_active else 'enable', 'Disable' if u.is_active else 'Enable', 'ghost', ''),
+      ('delete', 'Delete', 'danger', 'Delete ' ~ u.username ~ ' and their saved estimates? This cannot be undone.')] %}
+    {% if can(user, action, u) %}
+  <form method="post" action="{{ url_for('admin.user_action', uid=u.id, action=action) }}"{% if confirm %} data-confirm="{{ confirm }}"{% endif %}>
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    {% if back %}<input type="hidden" name="back" value="{{ back }}">{% endif %}
+    <button type="submit" class="{{ cls }} small">{{ label }}</button>
+  </form>
+    {% endif %}
+  {% endfor %}
+  {% if u.role == 'superadmin' %}<span class="sub">Protected</span>{% endif %}
+</div>

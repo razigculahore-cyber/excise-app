@@ -1,48 +1,24 @@
-"""First-run setup, sign in, sign up, sign out and change password."""
+"""Sign in, sign up, sign out and change password.
+
+There is no web setup page: the Super Admin is created from the terminal (`flask create-superadmin`)
+or by the SQLite migration, so no visitor can make themselves an admin.
+"""
 from flask import Blueprint, current_app, flash, g, redirect, render_template, request, session, url_for
 
-from ..security import client_ip, login_required, safe_next
+from ..security import client_ip, login_required, safe_next, start_session
 from ..services import audit, users
 
 bp = Blueprint("auth", __name__)
 
 
-def _start_session(uid: int) -> None:
-    session.clear()
-    session.permanent = True
-    session["user_id"] = uid
-
-
 def _signed_in() -> bool:
     uid = session.get("user_id")
-    return uid is not None and users.get_active(uid) is not None
-
-
-@bp.route("/setup", methods=["GET", "POST"])
-def setup():
-    """First run only: create the admin account."""
-    if users.count() > 0:
-        return redirect(url_for("auth.login"))
-    form = {"username": "", "full_name": ""}
-    if request.method == "POST":
-        form = {k: request.form.get(k, "").strip() for k in form}
-        pw = request.form.get("password", "")
-        problem = (users.username_problem(form["username"])
-                   or users.password_problem(pw, request.form.get("confirm", "")))
-        if problem:
-            flash(problem, "error")
-        else:
-            uid = users.create(form["username"], form["full_name"], pw, is_admin=True)
-            audit.log("setup", users.get(uid), ip=client_ip())
-            flash("Admin account created. Sign in to continue.", "ok")
-            return redirect(url_for("auth.login"))
-    return render_template("auth/setup.html", form=form)
+    user = users.get_active(uid) if uid is not None else None
+    return user is not None and user["session_version"] == session.get("ver")
 
 
 @bp.route("/login", methods=["GET", "POST"])
 def login():
-    if users.count() == 0:
-        return redirect(url_for("auth.setup"))
     if _signed_in():
         return redirect(url_for("main.calculator"))
 
@@ -59,16 +35,17 @@ def login():
             return render_template("auth/login.html", username=username), 429
 
         user = users.get_by_username(username)
-        if user and user["is_active"] and users.verify(user, pw):
+        password_ok = users.verify(user, pw)
+        if user and user["is_active"] and password_ok:
             users.clear_failures(username, ip)
             users.touch_login(user["id"])
             audit.log("login", user, ip=ip)
-            _start_session(user["id"])
+            start_session(user)
             return redirect(safe_next(request.args.get("next")))
 
         users.record_failure(username, ip)
         audit.log("login_failed", username=username, ip=ip)
-        if user and not user["is_active"] and users.verify(user, pw):
+        if user and not user["is_active"] and password_ok:
             flash("This account is disabled. Ask the admin to enable it.", "error")
         else:
             flash("Wrong username or password.", "error")
@@ -79,8 +56,6 @@ def login():
 
 @bp.route("/signup", methods=["GET", "POST"])
 def signup():
-    if users.count() == 0:
-        return redirect(url_for("auth.setup"))
     if not current_app.config["ALLOW_SIGNUP"]:
         flash("Sign-up is turned off. Ask the admin to create an account for you.", "error")
         return redirect(url_for("auth.login"))
@@ -97,14 +72,15 @@ def signup():
             flash(problem, "error")
             return render_template("auth/signup.html", form=form), 400
         try:
+            # Always a normal user: nothing in the request can choose the role
             uid = users.create(form["username"], form["full_name"], pw)
         except users.UsernameTaken:
             flash("That username is already taken.", "error")
             return render_template("auth/signup.html", form=form), 409
-        user = users.get(uid)
         users.touch_login(uid)
+        user = users.get(uid)
         audit.log("signup", user, ip=client_ip())
-        _start_session(uid)
+        start_session(user)
         return redirect(url_for("main.calculator"))
 
     return render_template("auth/signup.html", form=form)
@@ -133,8 +109,9 @@ def account():
             if problem:
                 flash(problem, "error")
             else:
-                users.set_password(g.user["id"], pw)
+                # Signs out the account's other sessions; this browser stays signed in
+                session["ver"] = users.set_password(g.user["id"], pw)
                 audit.log("password_changed", g.user, ip=client_ip())
-                flash("Password changed.", "ok")
+                flash("Password changed. Any other devices have been signed out.", "ok")
                 return redirect(url_for("auth.account"))
     return render_template("auth/account.html")

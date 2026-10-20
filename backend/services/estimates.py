@@ -99,3 +99,35 @@ def create(user_id: int, data: dict) -> int:
 def delete_for(user_id: int, estimate_id: int) -> bool:
     cur = get_db().execute("DELETE FROM estimates WHERE id = %s AND user_id = %s", (estimate_id, user_id))
     return cur.rowcount > 0
+
+
+# ------------------------------------------------------------------ Super Admin (read-only, all users)
+
+def _with_owner(row) -> dict:
+    d = _row_to_dict(row)
+    d.update(user_id=row["user_id"], owner=row["owner"], owner_name=row["owner_name"])
+    return d
+
+
+def list_all(user_id: int | None = None, limit: int = 500) -> list[dict]:
+    """Everyone's estimates, newest first, optionally for one user. Only for the Super Admin's pages."""
+    sql = ("SELECT e.*, u.username AS owner, u.full_name AS owner_name"
+           " FROM estimates e JOIN users u ON u.id = e.user_id")
+    params: tuple = ()
+    if user_id is not None:
+        sql += " WHERE e.user_id = %s"
+        params = (user_id,)
+    sql += " ORDER BY e.id DESC LIMIT %s"
+    return [_with_owner(r) for r in get_db().execute(sql, params + (limit,)).fetchall()]
+
+
+def get_any(estimate_id: int) -> dict | None:
+    """One estimate of any user, with its owner. Only for the Super Admin's pages."""
+    row = get_db().execute(
+        "SELECT e.*, u.username AS owner, u.full_name AS owner_name"
+        " FROM estimates e JOIN users u ON u.id = e.user_id WHERE e.id = %s", (estimate_id,)).fetchone()
+    return _with_owner(row) if row else None
+
+
+def total_count() -> int:
+    return get_db().execute("SELECT COUNT(*) AS n FROM estimates").fetchone()["n"]

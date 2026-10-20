@@ -6,7 +6,7 @@
   <div>
     <p class="eyebrow">Your account</p>
     <h1>{{ user.full_name or user.username }}</h1>
-    <p class="sub">Signed in as <strong>{{ user.username }}</strong> · {{ 'Admin' if user.is_admin else 'Staff' }} · member since {{ user.created_at[:10] }}</p>
+    <p class="sub">Signed in as <strong>{{ user.username }}</strong> · {{ role_labels[user.role] }} · member since {{ user.created_at[:10] }}</p>
   </div>
 </div>
 <section class="panel">

@@ -3,31 +3,27 @@
 {% block content %}
 <div class="page-head">
   <div>
-    <p class="eyebrow">Admin</p>
+    <p class="eyebrow">Super Admin</p>
     <h1>Activity</h1>
-    <p class="sub">The latest {{ rows|length }} sign-ins and account changes, newest first.</p>
+    <p class="sub">The latest {{ rows|length }} {{ 'sign-ins' if sign_ins else 'sign-ins and account changes' }}{% if person %} for <strong>{{ person.username }}</strong>{% endif %}, newest first.</p>
   </div>
 </div>
 <section class="panel">
-  {% if rows %}
-  <div class="tablewrap">
-    <table class="data">
-      <thead><tr><th>When</th><th>User</th><th>Event</th><th>Detail</th><th>IP address</th></tr></thead>
-      <tbody>
-      {% for r in rows %}
-        <tr>
-          <td class="when">{{ r.at }}</td>
-          <td><strong>{{ r.username or '—' }}</strong></td>
-          <td><span class="pill{{ ' off' if r.event in ('login_failed', 'login_locked', 'user_deleted', 'user_disabled') else (' neutral' if r.event == 'logout' else '') }}">{{ labels.get(r.event, r.event) }}</span></td>
-          <td>{{ r.detail }}</td>
-          <td class="when">{{ r.ip }}</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% else %}
-  <div class="empty"><strong>No activity yet</strong></div>
-  {% endif %}
+  <form method="get" class="filterbar">
+    <label>User
+      <select name="user">
+        <option value="">Everyone</option>
+        {% for p in people %}<option value="{{ p.id }}"{% if person and person.id == p.id %} selected{% endif %}>{{ p.username }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Show
+      <select name="only">
+        <option value="">Everything</option>
+        <option value="signins"{% if sign_ins %} selected{% endif %}>Sign-ins only</option>
+      </select>
+    </label>
+    <button type="submit" class="ghost">Filter</button>
+  </form>
+  {% include "admin/_activity_table.html" %}
 </section>
 {% endblock %}

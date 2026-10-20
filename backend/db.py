@@ -20,12 +20,28 @@ CREATE TABLE IF NOT EXISTS users (
     username      TEXT NOT NULL,
     full_name     TEXT NOT NULL DEFAULT '',
     password_hash TEXT NOT NULL,
-    is_admin      BOOLEAN NOT NULL DEFAULT FALSE,
+    role          TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin', 'superadmin')),
     is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+    -- bumped on password, role or status changes; sessions holding an older value are signed out
+    session_version INTEGER NOT NULL DEFAULT 1,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    last_login    TIMESTAMPTZ
+    last_login    TIMESTAMPTZ,
+    CONSTRAINT superadmin_always_active CHECK (role <> 'superadmin' OR is_active)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS users_username_key ON users (lower(username));
+-- At most one Super Admin, enforced by the database even if two requests race
+CREATE UNIQUE INDEX IF NOT EXISTS users_one_superadmin ON users (role) WHERE role = 'superadmin';
+-- The Super Admin row can't be deleted or demoted through the app (change it in the Neon console)
+CREATE OR REPLACE FUNCTION protect_superadmin() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF OLD.role = 'superadmin' AND (TG_OP = 'DELETE' OR NEW.role <> 'superadmin') THEN
+        RAISE EXCEPTION 'The Super Admin account is protected' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END $$;
+DROP TRIGGER IF EXISTS users_protect_superadmin ON users;
+CREATE TRIGGER users_protect_superadmin BEFORE UPDATE OF role OR DELETE ON users
+    FOR EACH ROW EXECUTE FUNCTION protect_superadmin();
 CREATE TABLE IF NOT EXISTS failed_logins (
     username TEXT NOT NULL,
     ip       TEXT NOT NULL,
@@ -52,6 +68,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
     detail   TEXT NOT NULL DEFAULT '',
     ip       TEXT NOT NULL DEFAULT ''
 );
+CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log (user_id, id DESC);
 """
 
 

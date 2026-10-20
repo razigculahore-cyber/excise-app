@@ -1,0 +1,44 @@
+{% extends "app/base.html" %}
+{% block title %}{{ e.title }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Super Admin · saved estimate</p>
+    <h1>{{ e.title }}</h1>
+    <p class="sub">Saved by <a href="{{ url_for('admin.user_detail', uid=e.user_id) }}"><strong>{{ e.owner }}</strong></a>{% if e.owner_name %} ({{ e.owner_name }}){% endif %} on {{ e.created_at }}{% if e.summary and e.summary != e.title %} · {{ e.summary }}{% endif %}</p>
+  </div>
+  <a class="btn ghost" href="{{ url_for('admin.all_estimates', user=e.user_id) }}">Their estimates</a>
+</div>
+
+<dl class="stats">
+  <div class="stat"><dt>Total</dt><dd>Rs {{ '{:,.2f}'.format(e.total).rstrip('0').rstrip('.') }}</dd></div>
+  <div class="stat"><dt>Lines</dt><dd>{{ e.lines|length }}</dd></div>
+</dl>
+
+<section class="panel">
+  <h2>Breakdown</h2>
+  <div class="tablewrap">
+    <table class="data">
+      <thead><tr><th>Item</th><th class="num">Amount</th></tr></thead>
+      <tbody>
+      {% for line in e.lines %}
+        <tr><td>{{ line.label }}</td><td class="num">Rs {{ '{:,.2f}'.format(line.amount).rstrip('0').rstrip('.') }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Inputs entered</h2>
+  <div class="tablewrap">
+    <table class="data">
+      <tbody>
+      {% for key, value in e.inputs.items() if value %}
+        <tr><td class="when">{{ key }}</td><td>{{ value }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
