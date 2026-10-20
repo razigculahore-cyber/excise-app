@@ -6,6 +6,8 @@ from datetime import timedelta
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INSTANCE_DIR = os.path.join(BASE_DIR, "instance")
 FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
+# Served at /static/... by Flask locally and by Vercel's CDN in production (Vercel serves public/ directly)
+STATIC_DIR = os.path.join(BASE_DIR, "public", "static")
 
 try:
     # On your computer, settings such as DATABASE_URL come from .env (never committed).

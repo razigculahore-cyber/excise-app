@@ -11,7 +11,7 @@ Excise Fee Estimator: Flask application factory.
       routes/        auth, main (calculator), admin, api blueprints
     frontend/
       templates/     Jinja pages (auth/, app/, admin/)
-      static/        css/ and js/ (the fee engine runs in the browser)
+    public/static/   css/ and js/ (the fee engine runs in the browser); Vercel's CDN serves public/
 """
 import os
 
@@ -30,7 +30,8 @@ def create_app(overrides: dict | None = None, instance_dir: str | None = None) -
         __name__,
         instance_path=instance_dir,
         template_folder=os.path.join(cfg.FRONTEND_DIR, "templates"),
-        static_folder=os.path.join(cfg.FRONTEND_DIR, "static"),
+        static_folder=cfg.STATIC_DIR,
+        static_url_path="/static",
     )
     app.config.update(cfg.build_config(instance_dir))
     if overrides:
