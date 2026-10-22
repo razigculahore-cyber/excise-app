@@ -1,20 +1,27 @@
 """Database setup is explicit and safe to repeat."""
-from backend.db import SCHEMA_VERSION, connect, init_db
+import pytest
+def connect(url):
+    from backend.db import connect as factory
+    return factory(url)
+
+from backend.db import SCHEMA_VERSION, init_db
 from backend.services import users
 
 
 def test_init_db_is_safe_to_run_again(app, database_url, boss):
+    if database_url.startswith("offline://"):
+        pytest.skip("PostgreSQL migrations require --postgres")
     init_db(database_url)
     init_db(database_url)
     with app.app_context():
         assert users.get_by_username("boss")["role"] == "superadmin"   # existing data untouched
     with connect(database_url) as db:
-        assert db.execute("SELECT MAX(version) AS v FROM schema_version").fetchone()["v"] == SCHEMA_VERSION
+        assert db.execute("SELECT COUNT(*) AS v FROM excise_schema_migrations").fetchone()["v"] == SCHEMA_VERSION
 
 
 def test_init_db_command(app):
     result = app.test_cli_runner().invoke(args=["init-db"])
-    assert result.exit_code == 0 and "ready" in result.output
+    assert result.exit_code == 0 and "--confirm-write" in result.output
 
 
 def test_app_start_does_not_touch_the_schema(database_url, tmp_path, monkeypatch):

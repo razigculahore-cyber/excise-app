@@ -61,6 +61,8 @@ def test_dry_run_checks_everything_and_writes_nothing(app, database_url, old_db)
 
 
 def test_real_copy_preserves_everything(app, database_url, old_db, make_browser):
+    if database_url.startswith("offline://"):
+        pytest.skip("PostgreSQL import requires --postgres")
     before = digest(old_db)
     migrate.run(str(old_db), database_url, "boss", dry_run=False, check_password="bosspass1")
     assert digest(old_db) == before
@@ -84,6 +86,8 @@ def test_real_copy_preserves_everything(app, database_url, old_db, make_browser)
 
 
 def test_refuses_a_target_that_already_has_data(app, database_url, old_db, boss):
+    if database_url.startswith("offline://"):
+        pytest.skip("PostgreSQL import requires --postgres")
     with pytest.raises(migrate.MigrationError, match="already has data"):
         migrate.run(str(old_db), database_url, "boss", dry_run=False)
     with app.app_context():
@@ -109,7 +113,7 @@ def test_missing_sqlite_file(database_url, tmp_path):
 
 
 def test_command_dry_run(app, old_db, monkeypatch, database_url):
-    monkeypatch.setenv("MIGRATION_TARGET", database_url)
+    monkeypatch.setenv("MIGRATION_TARGET", "postgresql://localhost/excise_test" if database_url.startswith("offline://") else database_url)
     result = app.test_cli_runner().invoke(args=["migrate-sqlite", "--sqlite", str(old_db), "--superadmin", "boss",
                                                 "--target", "MIGRATION_TARGET", "--dry-run"])
     assert result.exit_code == 0, result.output
@@ -117,7 +121,7 @@ def test_command_dry_run(app, old_db, monkeypatch, database_url):
 
 
 def test_command_real_run_needs_the_host_typed(app, old_db, monkeypatch, database_url):
-    monkeypatch.setenv("MIGRATION_TARGET", database_url)
+    monkeypatch.setenv("MIGRATION_TARGET", "postgresql://localhost/excise_test" if database_url.startswith("offline://") else database_url)
     result = app.test_cli_runner().invoke(args=["migrate-sqlite", "--sqlite", str(old_db), "--superadmin", "boss",
                                                 "--target", "MIGRATION_TARGET"], input="wrong-host\n")
     assert result.exit_code != 0 and "didn't match" in result.output

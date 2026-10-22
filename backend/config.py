@@ -11,7 +11,7 @@ STATIC_DIR = os.path.join(BASE_DIR, "public", "static")
 
 try:
     # On your computer, settings such as DATABASE_URL come from .env (never committed).
-    # python-dotenv is a dev-only package; on Vercel the variables are set in the dashboard.
+    # python-dotenv is a runtime package; on Vercel the variables are set in the dashboard.
     from dotenv import load_dotenv
     load_dotenv(os.path.join(BASE_DIR, ".env"))
 except ImportError:
@@ -51,7 +51,7 @@ def build_config(instance_dir: str = INSTANCE_DIR) -> dict:
     return {
         "APP_ENV": "production" if production else "development",
         "SECRET_KEY": secret or load_secret_key(instance_dir),
-        # PostgreSQL connection string (Neon). Never hard-code it; set it in .env or on Vercel.
+        # PostgreSQL connection string (Supabase PostgreSQL). Never hard-code it; set it in .env or on Vercel.
         "DATABASE_URL": os.environ.get("DATABASE_URL", ""),
         # Optional direct (non-pooled) connection for `flask init-db` and migrations
         "DATABASE_URL_UNPOOLED": os.environ.get("DATABASE_URL_UNPOOLED", ""),
@@ -68,7 +68,7 @@ def build_config(instance_dir: str = INSTANCE_DIR) -> dict:
         "PERMANENT_SESSION_LIFETIME": timedelta(hours=8),
         "MAX_CONTENT_LENGTH": 256 * 1024,  # no request needs more; stops oversized posts early
         # Set ALLOW_SIGNUP=0 so only an admin can create accounts
-        "ALLOW_SIGNUP": _flag("ALLOW_SIGNUP", True),
+        "ALLOW_SIGNUP": _flag("ALLOW_SIGNUP", False),
         "MIN_PASSWORD_LENGTH": 8,
         "MAX_FAILED_ATTEMPTS": 5,          # wrong passwords allowed...
         "LOCKOUT_SECONDS": 15 * 60,        # ...within this window before the account is locked

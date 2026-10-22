@@ -9,3 +9,8 @@ __pycache__/
 !.env.example
 .vercel/
 *.db
+
+.uv-cache/
+.env.*
+!.env.example
+.venv-merge/

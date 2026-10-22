@@ -8,12 +8,12 @@ dependencies = [
     "flask>=3.1,<4",
     "psycopg[binary]>=3.2,<4",
     "tzdata>=2024.1",
+    "python-dotenv>=1.0,<2",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8",
-    "python-dotenv>=1.0",
     "ruff>=0.6",
 ]
 

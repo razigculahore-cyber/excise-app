@@ -12,37 +12,60 @@ from backend.db import connect, init_db
 from backend.services import users
 
 
-def _where(url: str) -> tuple:
-    info = conninfo_to_dict(url)
-    return (info.get("host", "").replace("-pooler", ""), info.get("dbname"))
+def pytest_addoption(parser):
+    parser.addoption("--postgres", action="store_true", help="Use isolated local PostgreSQL test schemas")
 
 
-@pytest.fixture(scope="session")
-def database_url():
-    """A throwaway schema on the TEST database (never the real one), dropped after the run."""
+# This helper belongs to tests only. Runtime never accepts offline:// URLs.
+_real_connect = connect
+
+def connect(url, *args, **kwargs):
+    if url.startswith("offline://"):
+        from offline_db import OfflineDB
+        return OfflineDB(url.removeprefix("offline://"))
+    return _real_connect(url, *args, **kwargs)
+
+
+@pytest.fixture()
+def database_url(tmp_path, request, monkeypatch):
+    import backend.db
+    monkeypatch.setattr(backend.db, "connect", connect)
+    monkeypatch.setattr("backend.migrate.connect", connect)
+    if not request.config.getoption("--postgres"):
+        url = "offline://" + str(tmp_path / "test.sqlite")
+        with connect(url):
+            pass
+        yield url
+        return
     base = os.environ.get("TEST_DATABASE_URL", "")
-    if not base:
-        pytest.exit("Set TEST_DATABASE_URL in .env to a Neon test branch (see .env.example).", returncode=2)
-    production = os.environ.get("PRODUCTION_DATABASE_URL")
-    if production and _where(production) == _where(base):
-        pytest.exit("TEST_DATABASE_URL points at the production database. Use the Neon dev branch.", returncode=2)
-
-    schema = f"test_{uuid.uuid4().hex[:12]}"
-    with connect(base) as db:
-        db.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
-    url = make_conninfo(base, options=f"-c search_path={schema}")
-    init_db(url)
-    yield url
-    with connect(base) as db:
-        db.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
+    info = conninfo_to_dict(base)
+    if info.get("host") not in ("localhost", "127.0.0.1", "::1") or not info.get("dbname", "").endswith("_test"):
+        pytest.fail("--postgres requires local TEST_DATABASE_URL with database name ending _test")
+    schema = "excise_test_" + uuid.uuid4().hex
+    # Local-only test server may omit TLS. Application runtime still enforces TLS.
+    import psycopg
+    from psycopg.rows import dict_row
+    from backend.db import PostgresConnection
+    def local_connect(url, *args, **kwargs):
+        return PostgresConnection(psycopg.connect(url, autocommit=True, row_factory=dict_row))
+    monkeypatch.setattr(backend.db, "connect", local_connect)
+    monkeypatch.setattr("backend.migrate.connect", local_connect)
+    monkeypatch.setattr("backend.migrations.connect", local_connect)
+    with local_connect(base) as control:
+        control.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+        url = make_conninfo(base, options=f"-c search_path={schema} -c timezone=UTC")
+        try:
+            init_db(url)
+            init_db(url)
+            yield url
+        finally:
+            control.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
 
 
 @pytest.fixture()
 def app(tmp_path, database_url):
-    with connect(database_url) as db:
-        db.execute("TRUNCATE users, failed_logins, estimates, audit_log RESTART IDENTITY CASCADE")
-    return create_app({"TESTING": True, "SECRET_KEY": "test", "DATABASE_URL": database_url,
-                       "DATABASE_URL_UNPOOLED": database_url}, instance_dir=str(tmp_path))
+    return create_app({"TESTING": True, "SECRET_KEY": "test", "ALLOW_SIGNUP": True,
+                       "DATABASE_URL": database_url, "DATABASE_URL_UNPOOLED": database_url}, instance_dir=str(tmp_path))
 
 
 class Browser:

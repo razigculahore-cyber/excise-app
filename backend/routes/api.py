@@ -10,6 +10,8 @@ bp = Blueprint("api", __name__, url_prefix="/api")
 
 @bp.get("/health")
 def health():
+    from ..db import get_db
+    get_db().execute("SELECT 1").fetchone()
     return jsonify(status="ok")
 
 

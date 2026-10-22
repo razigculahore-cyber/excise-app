@@ -4,7 +4,7 @@ import math
 
 from flask import current_app
 
-from ..db import get_db
+from ..db import get_db, json_value
 
 INPUT_KEYS = ("txn", "vehicle", "motorCycleSub", "commercialSub", "cc", "kw", "ladenWeight",
               "invoiceValue", "advanceTax", "taxStatus", "owner", "cvt", "hpa", "invoiceDate", "regDate")
@@ -58,9 +58,9 @@ def _row_to_dict(row) -> dict:
         "id": row["id"],
         "title": row["title"],
         "summary": row["summary"],
-        "total": row["total"],
-        "inputs": json.loads(row["inputs"]),
-        "lines": json.loads(row["lines"]),
+        "total": float(row["total"]),
+        "inputs": json.loads(row["inputs"]) if isinstance(row["inputs"], str) else row["inputs"],
+        "lines": json.loads(row["lines"]) if isinstance(row["lines"], str) else row["lines"],
         "created_at": row["created_at"],
     }
 
@@ -86,13 +86,17 @@ def get_for(user_id: int, estimate_id: int) -> dict | None:
 
 
 def create(user_id: int, data: dict) -> int:
-    if count_for(user_id) >= current_app.config["MAX_SAVED_ESTIMATES"]:
-        raise TooManyEstimates()
-    row = get_db().execute(
-        "INSERT INTO estimates (user_id, title, summary, total, inputs, lines)"
-        " VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
-        (user_id, data["title"], data["summary"], data["total"],
-         json.dumps(data["inputs"]), json.dumps(data["lines"]))).fetchone()
+    db = get_db()
+    with db.transaction():
+        if getattr(db, "postgres", False):
+            db.execute("SELECT id FROM users WHERE id = %s FOR UPDATE", (user_id,))
+        if count_for(user_id) >= current_app.config["MAX_SAVED_ESTIMATES"]:
+            raise TooManyEstimates()
+        row = db.execute(
+            "INSERT INTO estimates (user_id, title, summary, total, inputs, lines)"
+            " VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+            (user_id, data["title"], data["summary"], data["total"],
+             json_value(db, data["inputs"]), json_value(db, data["lines"]))).fetchone()
     return row["id"]
 
 

@@ -1,6 +1,6 @@
 """One-time copy of the old SQLite database (instance/users.db) into PostgreSQL.
 
-    flask migrate-sqlite --superadmin USERNAME --dry-run     # full rehearsal, then rolled back
+    flask migrate-sqlite --superadmin USERNAME --dry-run     # source-only validation; no destination connection
     flask migrate-sqlite --superadmin USERNAME               # the real copy (asks you to confirm)
 
 - The SQLite file is opened read-only and never changed.
@@ -17,13 +17,11 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import click
-import psycopg
 from flask import current_app
-from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict
 from werkzeug.security import check_password_hash
 
-from .db import SCHEMA, SCHEMA_VERSION, connect
+from .db import connect
 from .permissions import ADMIN, SUPERADMIN, USER
 
 TABLES = ("users", "estimates", "audit_log", "failed_logins")
@@ -41,6 +39,7 @@ def read_sqlite(path: str) -> dict[str, list[dict]]:
         raise MigrationError(f"No SQLite database at {path}.")
     src = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True)
     src.row_factory = sqlite3.Row
+    src.execute("BEGIN")
     try:
         # Table names come from the fixed TABLES list above, never from input
         return {t: [dict(r) for r in src.execute(f"SELECT * FROM {t} ORDER BY rowid")]  # noqa: S608
@@ -98,77 +97,29 @@ def prepare(data: dict[str, list[dict]], superadmin: str, source_tz: str) -> dic
             "failed_logins": [dict(f) for f in data["failed_logins"]]}
 
 
-def _insert(db: psycopg.Connection, table: str, rows: list[dict], identity: bool) -> None:
-    if not rows:
-        return
-    cols = list(rows[0])
-    stmt = sql.SQL("INSERT INTO {} ({}) {} VALUES ({})").format(
-        sql.Identifier(table),
-        sql.SQL(", ").join(map(sql.Identifier, cols)),
-        sql.SQL("OVERRIDING SYSTEM VALUE" if identity else ""),
-        sql.SQL(", ").join(sql.Placeholder() * len(cols)))
-    with db.cursor() as cur:
-        cur.executemany(stmt, [tuple(r[c] for c in cols) for r in rows])
-
-
-def _count(db: psycopg.Connection, table: str) -> int:
-    return db.execute(sql.SQL("SELECT COUNT(*) AS n FROM {}").format(
-        sql.Identifier(table))).fetchone()["n"]
-
-
-def verify(db: psycopg.Connection, rows: dict[str, list[dict]]) -> dict[str, int]:
-    """Compare the copy with the source. Raises MigrationError if anything doesn't match."""
-    counts = {t: _count(db, t) for t in TABLES}
-    for t in TABLES:
-        if counts[t] != len(rows[t]):
-            raise MigrationError(f"{t}: expected {len(rows[t])} rows, found {counts[t]}.")
-    copied = {r["id"]: r for r in db.execute("SELECT id, username, password_hash, role FROM users").fetchall()}
-    for u in rows["users"]:
-        got = copied.get(u["id"])
-        if not got or (got["username"], got["password_hash"], got["role"]) != (
-                u["username"], u["password_hash"], u["role"]):
-            raise MigrationError(f"User {u['id']} wasn't copied exactly.")
-    if db.execute("SELECT COUNT(*) AS n FROM users WHERE role = %s", (SUPERADMIN,)).fetchone()["n"] != 1:
-        raise MigrationError("Expected exactly one Super Admin.")
-    orphans = db.execute("SELECT COUNT(*) AS n FROM estimates e LEFT JOIN users u ON u.id = e.user_id"
-                         " WHERE u.id IS NULL").fetchone()["n"]
-    if orphans:
-        raise MigrationError(f"{orphans} estimates have no owner.")
-    return counts
-
-
 def run(sqlite_path: str, target_url: str, superadmin: str, source_tz: str = "Asia/Karachi",
         dry_run: bool = True, check_password: str | None = None) -> dict[str, int]:
-    """Copy and verify. With dry_run the whole copy happens and is checked, then rolled back."""
+    """Copy atomically, or validate source only without contacting the destination."""
     rows = prepare(read_sqlite(sqlite_path), superadmin, source_tz)
-    with connect(target_url) as db:
-        try:
-            with db.transaction():
-                db.execute(SCHEMA)
-                db.execute("INSERT INTO schema_version (version) VALUES (%s) ON CONFLICT DO NOTHING",
-                           (SCHEMA_VERSION,))
-                busy = [t for t in ("users", "estimates", "audit_log") if _count(db, t)]
-                if busy:
-                    raise MigrationError(f"The target already has data in {', '.join(busy)}. Nothing was changed.")
-                _insert(db, "users", rows["users"], identity=True)
-                _insert(db, "estimates", rows["estimates"], identity=True)
-                _insert(db, "audit_log", rows["audit_log"], identity=True)
-                _insert(db, "failed_logins", rows["failed_logins"], identity=False)
-                for t in ("users", "estimates", "audit_log"):
-                    # New rows continue after the copied IDs
-                    db.execute(sql.SQL(
-                        "SELECT setval(pg_get_serial_sequence({t}, 'id'), COALESCE(MAX(id), 1), MAX(id) IS NOT NULL)"
-                        " FROM {i}").format(t=sql.Literal(t), i=sql.Identifier(t)))
-                counts = verify(db, rows)
-                if check_password is not None:
-                    row = db.execute("SELECT password_hash FROM users WHERE role = %s", (SUPERADMIN,)).fetchone()
-                    if not check_password_hash(row["password_hash"], check_password):
-                        raise MigrationError("That password doesn't match the Super Admin account. "
-                                             "Nothing was changed.")
-                if dry_run:
-                    raise psycopg.Rollback()
-        except psycopg.Error as e:
-            raise MigrationError(f"The database refused the copy ({type(e).__name__}). Nothing was changed.") from None
+    from .migrations import import_rows
+    # Validation and dry-run never contact a destination or run schema statements.
+    counts = {table: len(records) for table, records in rows.items()}
+    if check_password is not None:
+        chosen = next(u for u in rows["users"] if u["role"] == SUPERADMIN)
+        if not check_password_hash(chosen["password_hash"], check_password):
+            raise MigrationError("That password doesn't match the Super Admin account. Nothing was changed.")
+    if dry_run:
+        return counts
+    for record in rows["estimates"]:
+        for key in ("inputs", "lines"):
+            record[key] = json.loads(record[key])
+    try:
+        with connect(target_url) as db:
+            import_rows(db.raw, rows)
+    except ValueError:
+        raise MigrationError("The target already has data or failed verification. Nothing was changed.") from None
+    except Exception:
+        raise MigrationError("The database refused the copy. Nothing was changed.") from None
     return counts
 
 
@@ -208,7 +159,7 @@ def command(sqlite_path, superadmin, target_env, source_timezone, dry_run, check
         raise click.ClickException(str(e)) from None
     summary = ", ".join(f"{n} {t}" for t, n in counts.items())
     if dry_run:
-        click.echo(f"Dry run OK: {summary} copied and verified, then rolled back. Nothing was changed.")
+        click.echo(f"Dry run OK: {summary} source rows validated; destination not contacted. Nothing was changed.")
     else:
         click.echo(f"Done: {summary} copied and verified. '{superadmin}' is the Super Admin.")
     if check_login:

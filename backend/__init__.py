@@ -19,7 +19,7 @@ from flask import Flask, g, render_template, request
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import config as cfg
-from .db import close_db, init_db
+from .db import close_db, init_db, DatabaseUnavailable
 from .permissions import ROLE_LABELS, can, is_admin, is_superadmin
 from .security import check_csrf, csrf_token, security_headers
 
@@ -55,6 +55,8 @@ def create_app(overrides: dict | None = None, instance_dir: str | None = None) -
     for module in (auth, main, admin, api):
         app.register_blueprint(module.bp)
 
+    from .migrations import register_commands
+    register_commands(app)
     _register_errors(app)
     _register_commands(app)
     return app
@@ -67,12 +69,16 @@ def _register_commands(app: Flask) -> None:
     from .services import audit, users
 
     def admin_url() -> str:
-        # Table changes go over Neon's direct (unpooled) connection when one is configured
+        # Table changes go over the configured direct (unpooled) connection when one is configured
         return app.config.get("DATABASE_URL_UNPOOLED") or app.config["DATABASE_URL"]
 
     @app.cli.command("init-db")
-    def init_db_command() -> None:
+    @click.option("--confirm-write", is_flag=True)
+    def init_db_command(confirm_write) -> None:
         """Create the database tables (safe to re-run; never deletes data)."""
+        if not confirm_write:
+            click.echo("Review migrations/*.sql and use init-db --confirm-write to approve schema writes.")
+            return
         init_db(admin_url())
         click.echo("Database tables are ready.")
 
@@ -136,6 +142,9 @@ def _register_errors(app: Flask) -> None:
             return {"error": text}, code
         return render_template("message.html", title=title, text=text), code
 
+    import psycopg
+    app.register_error_handler(DatabaseUnavailable, lambda e: page(503, "Database unavailable", str(e)))
+    app.register_error_handler(psycopg.Error, lambda e: page(503, "Database unavailable", "Database operation failed. Contact the administrator."))
     app.register_error_handler(400, lambda e: page(400, "Please try again", e.description))
     app.register_error_handler(403, lambda e: page(403, "Not allowed", "You don't have permission to open this page."))
     app.register_error_handler(404, lambda e: page(404, "Not found", "That page or record doesn't exist."))
