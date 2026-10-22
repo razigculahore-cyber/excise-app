@@ -66,38 +66,68 @@ def _row_to_dict(row) -> dict:
 
 
 def count_for(user_id: int) -> int:
-    return get_db().execute("SELECT COUNT(*) FROM estimates WHERE user_id = ?", (user_id,)).fetchone()[0]
+    return get_db().execute(
+        "SELECT COUNT(*) AS n FROM estimates WHERE user_id = %s", (user_id,)).fetchone()["n"]
 
 
 def list_for(user_id: int, limit: int | None = None) -> list[dict]:
-    sql = "SELECT * FROM estimates WHERE user_id = ? ORDER BY id DESC"
+    sql = "SELECT * FROM estimates WHERE user_id = %s ORDER BY id DESC"
     params: tuple = (user_id,)
     if limit:
-        sql += " LIMIT ?"
+        sql += " LIMIT %s"
         params += (limit,)
     return [_row_to_dict(r) for r in get_db().execute(sql, params).fetchall()]
 
 
 def get_for(user_id: int, estimate_id: int) -> dict | None:
     row = get_db().execute(
-        "SELECT * FROM estimates WHERE id = ? AND user_id = ?", (estimate_id, user_id)).fetchone()
+        "SELECT * FROM estimates WHERE id = %s AND user_id = %s", (estimate_id, user_id)).fetchone()
     return _row_to_dict(row) if row else None
 
 
 def create(user_id: int, data: dict) -> int:
     if count_for(user_id) >= current_app.config["MAX_SAVED_ESTIMATES"]:
         raise TooManyEstimates()
-    db = get_db()
-    cur = db.execute(
-        "INSERT INTO estimates (user_id, title, summary, total, inputs, lines) VALUES (?, ?, ?, ?, ?, ?)",
+    row = get_db().execute(
+        "INSERT INTO estimates (user_id, title, summary, total, inputs, lines)"
+        " VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
         (user_id, data["title"], data["summary"], data["total"],
-         json.dumps(data["inputs"]), json.dumps(data["lines"])))
-    db.commit()
-    return cur.lastrowid
+         json.dumps(data["inputs"]), json.dumps(data["lines"]))).fetchone()
+    return row["id"]
 
 
 def delete_for(user_id: int, estimate_id: int) -> bool:
-    db = get_db()
-    cur = db.execute("DELETE FROM estimates WHERE id = ? AND user_id = ?", (estimate_id, user_id))
-    db.commit()
+    cur = get_db().execute("DELETE FROM estimates WHERE id = %s AND user_id = %s", (estimate_id, user_id))
     return cur.rowcount > 0
+
+
+# ------------------------------------------------------------------ Super Admin (read-only, all users)
+
+def _with_owner(row) -> dict:
+    d = _row_to_dict(row)
+    d.update(user_id=row["user_id"], owner=row["owner"], owner_name=row["owner_name"])
+    return d
+
+
+def list_all(user_id: int | None = None, limit: int = 500) -> list[dict]:
+    """Everyone's estimates, newest first, optionally for one user. Only for the Super Admin's pages."""
+    sql = ("SELECT e.*, u.username AS owner, u.full_name AS owner_name"
+           " FROM estimates e JOIN users u ON u.id = e.user_id")
+    params: tuple = ()
+    if user_id is not None:
+        sql += " WHERE e.user_id = %s"
+        params = (user_id,)
+    sql += " ORDER BY e.id DESC LIMIT %s"
+    return [_with_owner(r) for r in get_db().execute(sql, params + (limit,)).fetchall()]
+
+
+def get_any(estimate_id: int) -> dict | None:
+    """One estimate of any user, with its owner. Only for the Super Admin's pages."""
+    row = get_db().execute(
+        "SELECT e.*, u.username AS owner, u.full_name AS owner_name"
+        " FROM estimates e JOIN users u ON u.id = e.user_id WHERE e.id = %s", (estimate_id,)).fetchone()
+    return _with_owner(row) if row else None
+
+
+def total_count() -> int:
+    return get_db().execute("SELECT COUNT(*) AS n FROM estimates").fetchone()["n"]

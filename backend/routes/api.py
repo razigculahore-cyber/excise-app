@@ -1,6 +1,7 @@
 """JSON API used by the calculator page. Every endpoint needs a signed-in user."""
 from flask import Blueprint, g, jsonify, request
 
+from ..permissions import is_admin
 from ..security import api_login_required
 from ..services import estimates
 
@@ -16,7 +17,8 @@ def health():
 @api_login_required
 def me():
     u = g.user
-    return jsonify(id=u["id"], username=u["username"], full_name=u["full_name"], is_admin=bool(u["is_admin"]))
+    return jsonify(id=u["id"], username=u["username"], full_name=u["full_name"],
+                   role=u["role"], is_admin=is_admin(u))
 
 
 @bp.get("/estimates")
