@@ -41,7 +41,9 @@ def migrate(raw):
                 if not {"id", "username", "password_hash", "is_active", "created_at", "last_login", "full_name"}.issubset(columns) or not ({"role", "is_admin"} & columns):
                     raise ValueError("Incompatible existing users schema")
             else:
-                raw.execute(source, prepare=False)
+                # Windows editors may prefix UTF-8 files with a BOM. Keep the
+                # original checksum stable, but omit the marker from SQL execution.
+                raw.execute(source.removeprefix("\ufeff"), prepare=False)
             raw.execute("INSERT INTO excise_schema_migrations(version,checksum) VALUES (%s,%s)", (path.name, checksum))
 
 

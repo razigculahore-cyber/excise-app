@@ -193,3 +193,25 @@ def test_live_postgres_migration_checksum_guard(app):
         with pytest.raises(ValueError, match="checksum mismatch"):
             migrate(db.raw)
         assert users.count() == 0
+
+
+def test_migration_executes_windows_utf8_bom_without_changing_checksum(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+    from backend import migrations
+    source = '\ufeffSELECT 1;'
+    (tmp_path / '001_initial.sql').write_text(source, encoding='utf-8')
+    monkeypatch.setattr(migrations, 'MIGRATIONS', tmp_path)
+    raw = MagicMock()
+    def execute(statement, params=None, **kwargs):
+        cursor = MagicMock()
+        if statement.startswith('SELECT checksum'):
+            cursor.fetchone.return_value = None
+        elif statement.startswith('SELECT to_regclass'):
+            cursor.fetchone.return_value = {'name': None}
+        return cursor
+    raw.execute.side_effect = execute
+    migrations.migrate(raw)
+    raw.execute.assert_any_call('SELECT 1;', prepare=False)
+    raw.execute.assert_any_call(
+        'INSERT INTO excise_schema_migrations(version,checksum) VALUES (%s,%s)',
+        ('001_initial.sql', hashlib.sha256(source.encode()).hexdigest()))
