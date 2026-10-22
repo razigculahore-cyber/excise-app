@@ -38,6 +38,11 @@ def add_user():
 @bp.route("/users/<int:uid>/<action>", methods=["POST"])
 @admin_required
 def user_action(uid: int, action: str):
+    # Serialize account removals so concurrent requests cannot remove the last admins.
+    from ..db import get_db
+    db = get_db()
+    if getattr(db, "postgres", False):
+        db.execute("LOCK TABLE users IN EXCLUSIVE MODE")
     target = users.get(uid)
     if target is None or action not in ("disable", "enable", "delete", "reset"):
         abort(404)

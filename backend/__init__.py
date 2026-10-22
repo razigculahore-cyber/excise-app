@@ -16,7 +16,7 @@ import os
 from flask import Flask, g, render_template, request
 
 from . import config as cfg
-from .db import close_db, init_db
+from .db import close_db, init_db, DatabaseUnavailable
 from .security import check_csrf, csrf_token, security_headers
 
 
@@ -32,7 +32,12 @@ def create_app(overrides: dict | None = None, instance_dir: str | None = None) -
     if overrides:
         app.config.update(overrides)
 
-    init_db(app.config["DATABASE"])
+    if app.config["TESTING"]:
+        app.config["DATABASE_URL"] = ""
+    elif not app.config["DATABASE_URL"] and app.config["DATABASE_BACKEND"] != "sqlite":
+        raise RuntimeError("DATABASE_URL is required; configure PostgreSQL or explicitly select DATABASE_BACKEND=sqlite for local use.")
+    if not app.config["DATABASE_URL"]:
+        init_db(app.config["DATABASE"])
     app.teardown_appcontext(close_db)
     app.before_request(check_csrf)
     app.after_request(security_headers)
@@ -46,6 +51,8 @@ def create_app(overrides: dict | None = None, instance_dir: str | None = None) -
     for module in (auth, main, admin, api):
         app.register_blueprint(module.bp)
 
+    from .migrations import register_commands
+    register_commands(app)
     _register_errors(app)
     _register_commands(app)
     return app
@@ -79,6 +86,9 @@ def _register_errors(app: Flask) -> None:
             return {"error": text}, code
         return render_template("message.html", title=title, text=text), code
 
+    app.register_error_handler(DatabaseUnavailable, lambda e: page(503, "Database unavailable", str(e)))
+    import psycopg
+    app.register_error_handler(psycopg.Error, lambda e: page(503, "Database unavailable", "Database operation failed. Contact the administrator."))
     app.register_error_handler(400, lambda e: page(400, "Please try again", e.description))
     app.register_error_handler(403, lambda e: page(403, "Admins only", "Only an admin can open this page."))
     app.register_error_handler(404, lambda e: page(404, "Not found", "That page or record doesn't exist."))

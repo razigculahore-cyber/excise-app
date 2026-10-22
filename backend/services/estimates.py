@@ -4,7 +4,7 @@ import math
 
 from flask import current_app
 
-from ..db import get_db
+from ..db import get_db, insert_id, json_value
 
 INPUT_KEYS = ("txn", "vehicle", "motorCycleSub", "commercialSub", "cc", "kw", "ladenWeight",
               "invoiceValue", "advanceTax", "taxStatus", "owner", "cvt", "hpa", "invoiceDate", "regDate")
@@ -58,9 +58,9 @@ def _row_to_dict(row) -> dict:
         "id": row["id"],
         "title": row["title"],
         "summary": row["summary"],
-        "total": row["total"],
-        "inputs": json.loads(row["inputs"]),
-        "lines": json.loads(row["lines"]),
+        "total": float(row["total"]),
+        "inputs": json.loads(row["inputs"]) if isinstance(row["inputs"], str) else row["inputs"],
+        "lines": json.loads(row["lines"]) if isinstance(row["lines"], str) else row["lines"],
         "created_at": row["created_at"],
     }
 
@@ -85,15 +85,19 @@ def get_for(user_id: int, estimate_id: int) -> dict | None:
 
 
 def create(user_id: int, data: dict) -> int:
+    db = get_db()
+    if getattr(db, "postgres", False):
+        db.execute("SELECT id FROM users WHERE id = ? FOR UPDATE", (user_id,))
     if count_for(user_id) >= current_app.config["MAX_SAVED_ESTIMATES"]:
+        db.rollback()
         raise TooManyEstimates()
     db = get_db()
-    cur = db.execute(
+    new_id = insert_id(db,
         "INSERT INTO estimates (user_id, title, summary, total, inputs, lines) VALUES (?, ?, ?, ?, ?, ?)",
         (user_id, data["title"], data["summary"], data["total"],
-         json.dumps(data["inputs"]), json.dumps(data["lines"])))
+         json_value(db, data["inputs"]), json_value(db, data["lines"])))
     db.commit()
-    return cur.lastrowid
+    return new_id
 
 
 def delete_for(user_id: int, estimate_id: int) -> bool:

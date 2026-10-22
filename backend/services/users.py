@@ -1,11 +1,12 @@
 """User accounts, passwords and the failed-login lockout."""
 import sqlite3
 import time
+from psycopg.errors import UniqueViolation
 
 from flask import current_app
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from ..db import get_db
+from ..db import get_db, insert_id
 
 
 class UsernameTaken(Exception):
@@ -25,7 +26,7 @@ def get_active(uid: int):
 
 
 def get_by_username(username: str):
-    return get_db().execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+    return get_db().execute("SELECT * FROM users WHERE lower(username) = lower(?)", (username,)).fetchone()
 
 
 def list_all():
@@ -55,13 +56,14 @@ def username_problem(username: str) -> str | None:
 def create(username: str, full_name: str, password: str, is_admin: bool = False) -> int:
     db = get_db()
     try:
-        cur = db.execute(
+        uid = insert_id(db,
             "INSERT INTO users (username, full_name, password_hash, is_admin) VALUES (?, ?, ?, ?)",
             (username, full_name, generate_password_hash(password), int(is_admin)))
         db.commit()
-    except sqlite3.IntegrityError:
+    except (sqlite3.IntegrityError, UniqueViolation):
+        db.rollback()
         raise UsernameTaken(username) from None
-    return cur.lastrowid
+    return uid
 
 
 def verify(user, password: str) -> bool:
@@ -105,7 +107,7 @@ def recent_failures(username: str, ip: str) -> int:
     db.execute("DELETE FROM failed_logins WHERE at < ?", (cutoff,))
     db.commit()
     return db.execute(
-        "SELECT COUNT(*) FROM failed_logins WHERE username = ? AND ip = ?", (username, ip)).fetchone()[0]
+        "SELECT COUNT(*) FROM failed_logins WHERE lower(username) = lower(?) AND ip = ?", (username, ip)).fetchone()[0]
 
 
 def record_failure(username: str, ip: str) -> None:
@@ -117,7 +119,19 @@ def record_failure(username: str, ip: str) -> None:
 def clear_failures(username: str, ip: str | None = None) -> None:
     db = get_db()
     if ip is None:
-        db.execute("DELETE FROM failed_logins WHERE username = ?", (username,))
+        db.execute("DELETE FROM failed_logins WHERE lower(username) = lower(?)", (username,))
     else:
-        db.execute("DELETE FROM failed_logins WHERE username = ? AND ip = ?", (username, ip))
+        db.execute("DELETE FROM failed_logins WHERE lower(username) = lower(?) AND ip = ?", (username, ip))
     db.commit()
+
+
+def create_first_admin(username, full_name, password):
+    db = get_db()
+    if getattr(db, "postgres", False):
+        db.execute("LOCK TABLE users IN EXCLUSIVE MODE")
+    else:
+        db.execute("BEGIN IMMEDIATE")
+    if count():
+        db.rollback()
+        return None
+    return create(username, full_name, password, is_admin=True)

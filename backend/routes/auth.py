@@ -33,7 +33,9 @@ def setup():
         if problem:
             flash(problem, "error")
         else:
-            uid = users.create(form["username"], form["full_name"], pw, is_admin=True)
+            uid = users.create_first_admin(form["username"], form["full_name"], pw)
+            if uid is None:
+                return redirect(url_for("auth.login"))
             audit.log("setup", users.get(uid), ip=client_ip())
             flash("Admin account created. Sign in to continue.", "ok")
             return redirect(url_for("auth.login"))

@@ -5,3 +5,9 @@ __pycache__/
 .pytest_cache/
 *.bak
 .env
+
+.uv-cache/
+.env.*
+!.env.example
+*.db
+*.sqlite*

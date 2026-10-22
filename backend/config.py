@@ -2,6 +2,9 @@
 import os
 import secrets
 from datetime import timedelta
+from dotenv import load_dotenv
+
+load_dotenv(override=False)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INSTANCE_DIR = os.path.join(BASE_DIR, "instance")
@@ -29,6 +32,9 @@ def load_secret_key(instance_dir: str) -> str:
 def build_config(instance_dir: str = INSTANCE_DIR) -> dict:
     return {
         "SECRET_KEY": os.environ.get("SECRET_KEY") or load_secret_key(instance_dir),
+        "DATABASE_URL": os.environ.get("DATABASE_URL", "").strip(),
+        "DATABASE_BACKEND": os.environ.get("DATABASE_BACKEND", "postgres"),
+        "APP_TIMEZONE": os.environ.get("APP_TIMEZONE", "Asia/Karachi"),
         "DATABASE": os.path.join(instance_dir, "users.db"),
         "SESSION_COOKIE_HTTPONLY": True,
         "SESSION_COOKIE_SAMESITE": "Lax",
@@ -36,7 +42,7 @@ def build_config(instance_dir: str = INSTANCE_DIR) -> dict:
         "SESSION_COOKIE_SECURE": _flag("HTTPS", False),
         "PERMANENT_SESSION_LIFETIME": timedelta(hours=8),
         # Set ALLOW_SIGNUP=0 so only an admin can create accounts
-        "ALLOW_SIGNUP": _flag("ALLOW_SIGNUP", True),
+        "ALLOW_SIGNUP": _flag("ALLOW_SIGNUP", False),
         "MIN_PASSWORD_LENGTH": 8,
         "MAX_FAILED_ATTEMPTS": 5,          # wrong passwords allowed...
         "LOCKOUT_SECONDS": 15 * 60,        # ...within this window before the account is locked
