@@ -50,9 +50,9 @@ def sqlite_connect(path: str) -> sqlite3.Connection:
     return db
 
 
-def get_db() -> sqlite3.Connection:
+def get_db():
     if "db" not in g:
-        g.db = connect(current_app.config["DATABASE_URL"]) if current_app.config["DATABASE_URL"] else sqlite_connect(current_app.config["DATABASE"])
+        g.db = connect(current_app.config["DATABASE_URL"])
     return g.db
 
 
@@ -62,7 +62,7 @@ def close_db(_exc=None) -> None:
         db.close()
 
 
-def init_db(path: str) -> None:
+def init_sqlite(path: str) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     db = sqlite_connect(path)
     try:
@@ -76,7 +76,7 @@ class DatabaseUnavailable(Exception):
     """Sanitized connection failure, safe for HTTP responses."""
 
 
-def connect(url):
+def connect(url, tz="Asia/Karachi"):
     import psycopg
     from psycopg.rows import dict_row
     from psycopg.conninfo import conninfo_to_dict
@@ -85,8 +85,8 @@ def connect(url):
         if options.get("sslmode", "require") not in ("require", "verify-ca", "verify-full"):
             raise ValueError("TLS is required")
         options.setdefault("sslmode", "require")
-        options["options"] = "-c timezone=UTC -c search_path=public -c statement_timeout=15000"
-        return PostgresConnection(psycopg.connect(**options, connect_timeout=10, row_factory=dict_row))
+        options["options"] = options.get("options", "") + " -c timezone=UTC -c statement_timeout=15000"
+        return PostgresConnection(psycopg.connect(**options, connect_timeout=10, row_factory=dict_row, autocommit=True, prepare_threshold=None))
     except (psycopg.Error, ValueError):
         raise DatabaseUnavailable("Database unavailable. Check server database configuration.") from None
 
@@ -125,12 +125,23 @@ class PostgresConnection:
 
     def execute(self, sql, params=()):
         # Service queries have no literal question marks; all values remain bound parameters.
-        sql = sql.replace("?", "%s").replace("datetime('now', 'localtime')", "CURRENT_TIMESTAMP")
-        try:
-            return Cursor(self.raw.execute(sql, params))
-        except Exception:
-            self.raw.rollback()
-            raise
+        if isinstance(sql, str):
+            sql = sql.replace("?", "%s").replace("datetime('now', 'localtime')", "CURRENT_TIMESTAMP")
+        # Single statements autocommit; transaction() manages rollback for grouped writes.
+        return Cursor(self.raw.execute(sql, params))
+
+    def __enter__(self):
+        self.raw.__enter__()
+        return self
+
+    def __exit__(self, *args):
+        return self.raw.__exit__(*args)
+
+    def transaction(self):
+        return self.raw.transaction()
+
+    def cursor(self):
+        return self.raw.cursor()
 
     def commit(self):
         self.raw.commit()
@@ -153,3 +164,12 @@ def json_value(db, value):
     import json
     from psycopg.types.json import Jsonb
     return Jsonb(value) if getattr(db, "postgres", False) else json.dumps(value)
+
+
+# Explicit CLI/programmatic migration entrypoint; never invoked at application startup.
+SCHEMA_VERSION = 2
+
+def init_db(url):
+    from .migrations import migrate
+    with connect(url).raw as raw:
+        migrate(raw)

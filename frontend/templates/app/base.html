@@ -7,9 +7,12 @@
     <nav class="shell-nav" aria-label="Main">
       {{ navlink('main.calculator', 'Calculator') }}
       {{ navlink('main.saved_estimates', 'Saved estimates') }}
-      {% if user.is_admin %}
+      {% if is_admin(user) %}
         <span class="sep" aria-hidden="true"></span>
         {{ navlink('admin.user_list', 'Users') }}
+      {% endif %}
+      {% if is_superadmin(user) %}
+        {{ navlink('admin.all_estimates', 'All estimates') }}
         {{ navlink('admin.activity', 'Activity') }}
       {% endif %}
     </nav>
@@ -17,7 +20,7 @@
     <details class="usermenu">
       <summary aria-label="Account menu">
         <span class="avatar" aria-hidden="true">{{ (display.split()|map('first')|join)[:2]|upper }}</span>
-        <span class="who"><strong>{{ display }}</strong><span>{{ 'Admin' if user.is_admin else 'Staff' }}</span></span>
+        <span class="who"><strong>{{ display }}</strong><span>{{ role_labels[user.role] }}</span></span>
       </summary>
       <div class="menu">
         <a href="{{ url_for('auth.account') }}">Account &amp; password</a>

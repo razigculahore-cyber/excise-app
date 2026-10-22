@@ -1,0 +1,21 @@
+{# Read-only list of estimates with their owner. The Super Admin can open them but not delete them. #}
+{% if estimates %}
+<div class="tablewrap">
+  <table class="data">
+    <thead><tr><th>Estimate</th>{% if show_owner %}<th>Owner</th>{% endif %}<th>Saved</th><th class="num">Total</th><th>Actions</th></tr></thead>
+    <tbody>
+    {% for e in estimates %}
+      <tr>
+        <td><strong>{{ e.title }}</strong>{% if e.summary and e.summary != e.title %}<span class="sub">{{ e.summary }}</span>{% endif %}</td>
+        {% if show_owner %}<td><a href="{{ url_for('admin.user_detail', uid=e.user_id) }}">{{ e.owner }}</a>{% if e.owner_name %}<span class="sub">{{ e.owner_name }}</span>{% endif %}</td>{% endif %}
+        <td class="when">{{ e.created_at }}</td>
+        <td class="num">Rs {{ '{:,.2f}'.format(e.total).rstrip('0').rstrip('.') }}</td>
+        <td><div class="acts"><a class="btn ghost small" href="{{ url_for('admin.estimate_detail', estimate_id=e.id) }}">View</a></div></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty"><strong>No saved estimates</strong></div>
+{% endif %}

@@ -1,9 +1,10 @@
-"""CSRF protection, security headers and the login/admin guards."""
+"""CSRF protection, security headers and the login / admin / Super Admin guards."""
 import secrets
 from functools import wraps
 
-from flask import abort, g, jsonify, redirect, request, session, url_for
+from flask import abort, current_app, g, jsonify, redirect, request, session, url_for
 
+from .permissions import is_admin, is_superadmin
 from .services import users
 
 # Fonts come from Google; everything else is served by this app. No inline scripts.
@@ -37,11 +38,22 @@ def security_headers(resp):
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["Referrer-Policy"] = "same-origin"
     resp.headers["Content-Security-Policy"] = CSP
+    if current_app.config["SESSION_COOKIE_SECURE"]:
+        resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return resp
 
 
 def client_ip() -> str:
+    # Behind Vercel, ProxyFix (TRUST_PROXY=1) has already put the visitor's address here
     return request.remote_addr or "?"
+
+
+def start_session(user) -> None:
+    """Sign `user` in on this browser. Remembers the account's session version (see _load_user)."""
+    session.clear()
+    session.permanent = True
+    session["user_id"] = user["id"]
+    session["ver"] = user["session_version"]
 
 
 def safe_next(target: str | None) -> str:
@@ -52,15 +64,20 @@ def safe_next(target: str | None) -> str:
 
 
 def _load_user():
+    """The signed-in, active user, or None. A password, role or status change since sign-in
+    bumps the account's session_version, which signs out every older session."""
     uid = session.get("user_id")
-    return users.get_active(uid) if uid is not None else None
+    if uid is None:
+        return None
+    user = users.get_active(uid)
+    if user is None or user["session_version"] != session.get("ver"):
+        return None
+    return user
 
 
 def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
-        if users.count() == 0:
-            return redirect(url_for("auth.setup"))
         user = _load_user()
         if user is None:
             session.clear()
@@ -71,10 +88,21 @@ def login_required(view):
 
 
 def admin_required(view):
+    """Admins and the Super Admin."""
     @wraps(view)
     @login_required
     def wrapped(*args, **kwargs):
-        if not g.user["is_admin"]:
+        if not is_admin(g.user):
+            abort(403)
+        return view(*args, **kwargs)
+    return wrapped
+
+
+def superadmin_required(view):
+    @wraps(view)
+    @login_required
+    def wrapped(*args, **kwargs):
+        if not is_superadmin(g.user):
             abort(403)
         return view(*args, **kwargs)
     return wrapped

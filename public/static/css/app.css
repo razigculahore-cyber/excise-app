@@ -202,6 +202,7 @@ table.data .sub { display: block; color: var(--muted); font-size: 12.5px; }
 .pill { font: 600 11px/1 var(--font-mono); padding: 4px 8px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); white-space: nowrap; display: inline-block; }
 .pill.off { background: var(--error-bg); color: var(--error); }
 .pill.neutral { background: var(--surface-2); color: var(--muted); border: 1px solid var(--line); }
+.pill.warn { background: var(--warn-bg); color: var(--warn); }
 
 .acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .acts form { margin: 0; display: flex; gap: 6px; }
@@ -224,6 +225,8 @@ table.data .sub { display: block; color: var(--muted); font-size: 12.5px; }
 /* ---------- admin ---------- */
 .addform { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; align-items: end; }
 .addform label.check { padding-bottom: 10px; }
+.panel form.filterbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.filterbar label { min-width: 180px; }
 
 /* ---------- calculator ---------- */
 .calc { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr); gap: 24px; align-items: start; }

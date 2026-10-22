@@ -12,7 +12,7 @@ from flask import current_app
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
-from .db import connect, DatabaseUnavailable
+from .db import connect
 
 MIGRATIONS = Path(__file__).resolve().parent.parent / "migrations"
 TABLES = ("users", "estimates", "audit_log", "failed_logins")
@@ -31,7 +31,17 @@ def migrate(raw):
                 if existing["checksum"] != checksum:
                     raise ValueError("Applied migration checksum mismatch")
                 continue
-            raw.execute(source, prepare=False)
+            # Adopt a complete existing main-branch schema without replacing any tables.
+            exists = raw.execute("SELECT to_regclass('users') AS name").fetchone()["name"]
+            if path.name == "001_initial.sql" and exists:
+                for table in TABLES:
+                    if not raw.execute("SELECT to_regclass(%s) AS name", (table,)).fetchone()["name"]:
+                        raise ValueError("Partial existing schema; review it before migration")
+                columns = {r["column_name"] for r in raw.execute("SELECT column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='users'").fetchall()}
+                if not {"id", "username", "password_hash", "is_active", "created_at", "last_login", "full_name"}.issubset(columns) or not ({"role", "is_admin"} & columns):
+                    raise ValueError("Incompatible existing users schema")
+            else:
+                raw.execute(source, prepare=False)
             raw.execute("INSERT INTO excise_schema_migrations(version,checksum) VALUES (%s,%s)", (path.name, checksum))
 
 
@@ -70,15 +80,26 @@ def import_rows(raw, rows):
             if raw.execute(sql.SQL("SELECT COUNT(*) AS n FROM {}").format(sql.Identifier(table))).fetchone()["n"]:
                 raise ValueError("Destination must be empty; no records were imported")
         for table, records in rows.items():
-            for record in records:
+            for original in records:
+                record = dict(original)
+                if table == "users":
+                    record.setdefault("role", "admin" if record.get("is_admin") else "user")
+                    record.pop("is_admin", None)
+                    record["is_active"] = bool(record["is_active"])
                 columns = list(record)
                 values = [Jsonb(record[k]) if k in ("inputs", "lines") else record[k] for k in columns]
-                raw.execute(sql.SQL("INSERT INTO {} ({}) VALUES ({})").format(
+                raw.execute(sql.SQL("INSERT INTO {} ({}) OVERRIDING SYSTEM VALUE VALUES ({})").format(
                     sql.Identifier(table), sql.SQL(',').join(map(sql.Identifier, columns)),
                     sql.SQL(',').join(sql.Placeholder() for _ in columns)), values)
             n = raw.execute(sql.SQL("SELECT COUNT(*) AS n FROM {}").format(sql.Identifier(table))).fetchone()["n"]
             if n != len(records):
                 raise ValueError("Imported row count mismatch")
+        copied = {r["id"]: r for r in raw.execute("SELECT id,username,password_hash,role FROM users").fetchall()}
+        for original in rows["users"]:
+            actual = copied[original["id"]]
+            expected_role = original.get("role", "admin" if original.get("is_admin") else "user")
+            if (actual["username"], actual["password_hash"], actual["role"]) != (original["username"], original["password_hash"], expected_role):
+                raise ValueError("Imported account verification failed")
         # ALTER SEQUENCE is transactional, unlike setval(). Only allowlisted table names are used.
         for table in ("users", "estimates", "audit_log"):
             next_id = max((r["id"] for r in rows[table]), default=0) + 1
@@ -89,7 +110,7 @@ def import_rows(raw, rows):
 
 def register_commands(app):
     def connection():
-        url = current_app.config["DATABASE_URL"]
+        url = current_app.config.get("DATABASE_URL_UNPOOLED") or current_app.config["DATABASE_URL"]
         if not url:
             raise click.ClickException("DATABASE_URL is required")
         return connect(url).raw
@@ -111,11 +132,17 @@ def register_commands(app):
     @app.cli.command("db-import-sqlite")
     @click.argument("source", type=click.Path(exists=True, dir_okay=False))
     @click.option("--source-timezone", required=True, help="IANA timezone used by the original SQLite server.")
+    @click.option("--superadmin", default=None, help="Explicitly promote this existing active source admin during import.")
     @click.option("--dry-run", is_flag=True, help="Validate source only; never connect to destination.")
     @click.option("--confirm-write", is_flag=True, help="Approve import including preserved accounts into an empty destination.")
-    def db_import(source, source_timezone, dry_run, confirm_write):
+    def db_import(source, source_timezone, superadmin, dry_run, confirm_write):
         try:
             rows = read_source(source, source_timezone)
+            if superadmin:
+                chosen = [r for r in rows["users"] if r["username"].lower() == superadmin.lower() and r.get("is_admin") and r["is_active"]]
+                if len(chosen) != 1:
+                    raise ValueError("Choose an existing active admin")
+                chosen[0]["role"] = "superadmin"
             click.echo("Source row counts: " + json.dumps({k: len(v) for k, v in rows.items()}))
             if dry_run or not confirm_write:
                 click.echo("Dry run: source unchanged; destination not contacted.")

@@ -1,130 +1,129 @@
-﻿# Supabase PostgreSQL setup
+﻿# Supabase setup and operation
 
-The existing Flask sessions, Werkzeug hashes, CSRF checks, admin/staff authorization,
-saved-estimate ownership and browser fee engine are preserved. Supabase Auth is not used.
-The backend connects with psycopg; no database credentials reach the browser.
+## Environment and uv
 
-## Install and configure
+Python 3.12 is pinned by .python-version. Use `uv sync` for development and `uv sync --no-dev`
+for runtime dependencies. pyproject.toml and uv.lock are the source of truth; requirements
+files remain compatibility exports. Copy .env.example to .env privately. Environment values
+have priority over dotenv. Configure:
 
-Use Python 3.10+ and uv. From the repository root:
+- DATABASE_URL: server-only Supabase PostgreSQL URI, using Session pooler port 5432 for
+  persistent IPv4 backends or Direct where networking supports it. Percent-encode passwords.
+- DATABASE_URL_UNPOOLED: optional direct migration/import URI; defaults to DATABASE_URL.
+- SECRET_KEY: stable random secret; mandatory 32+ characters in production. Preserve the old
+  private instance/secret_key value if session continuity is intended.
+- HTTPS=0 locally; HTTPS=1 in production. APP_ENV=production (automatic on Vercel) enables
+  strong-key validation, secure __Host-session cookies, HSTS and proxy handling defaults.
+- ALLOW_SIGNUP=0 unless public User registration is intended.
+- APP_TIMEZONE=Asia/Karachi for timestamp presentation; storage is UTC.
+- TEST_DATABASE_URL: local disposable PostgreSQL with name ending _test, only for opt-in tests.
 
-```powershell
-uv venv .venv
-uv pip sync --python .venv/Scripts/python.exe requirements.lock
-Copy-Item .env.example .env
-```
+Runtime always requires PostgreSQL DATABASE_URL. SQLite is retained only for legacy source
+reading and offline test doubles. No production SQLite fallback is selected. All PostgreSQL
+runtime connections require sslmode=require, verify-ca or verify-full; weaker modes are refused.
+For verify-full obtain the CA certificate from Supabase and configure sslrootcert and hostname.
+No browser database connection, Supabase Auth change or service-role key is needed.
 
-Edit `.env` privately:
-
-- `DATABASE_URL`: PostgreSQL URI from Supabase **Connect**. Choose **Session pooler**
-  (port 5432) for persistent IPv4-only hosting, or Direct connection when IPv6 is available.
-  Percent-encode password characters in the URI. Include `sslmode=require`, or preferably
-  `sslmode=verify-full&sslrootcert=PATH` with the downloaded CA certificate.
-- `SECRET_KEY`: stable random deployment secret. To retain current sessions, use the existing
-  `instance/secret_key` value privately. Otherwise set a new cryptographically random secret.
-  Local development retains the existing generated secret-file fallback.
-- `HTTPS=0` locally; `HTTPS=1` behind production HTTPS.
-- `ALLOW_SIGNUP=0` unless public staff registration is intended.
-- `APP_TIMEZONE=Asia/Karachi`: presentation timezone. PostgreSQL stores UTC instants.
-
-Environment variables override `.env`. Missing DATABASE_URL fails explicitly rather than
-silently opening SQLite. For intentional legacy local operation only, set DATABASE_BACKEND=sqlite
-and leave DATABASE_URL empty. Existing instance/users.db is never automatically imported or deleted.
-
-## Dashboard and deployment actions
-
-1. Obtain the correct Session Pooler or Direct URI from your own project's Connect panel.
-2. Review `migrations/001_initial.sql` and authorize schema writes before applying.
-3. Enforce SSL and limit network access to your backend where practical.
-4. Use a dedicated least-privilege backend login for runtime; use an owner/migration login
-   only for migrations/imports. Runtime needs schema USAGE, SELECT/INSERT/UPDATE/DELETE
-   on the four application tables, and USAGE/SELECT on their identity sequences. It does
-   not need schema CREATE, Supabase API keys, or service-role keys.
-5. The migration revokes table and identity-sequence access from Supabase anon/authenticated
-   roles. Do not grant those roles access to password hashes or these private tables.
-   Flask enforces ownership for direct SQL connections; privileged SQL roles bypass RLS.
-   RLS policies tied to Supabase Auth are not introduced because this app uses Flask sessions.
-6. Protect initial `/setup` with private deployment access until the owner creates the first
-   administrator. Setup serializes database access and closes once any user exists.
-7. Run behind a production WSGI server and HTTPS proxy; limit worker concurrency to your
-   database connection capacity. Each Flask request holds at most one connection, which is
-   rolled back and closed at teardown. Queries have a 15-second statement timeout and
-   connections a 10-second timeout. No application connection pool is added.
-
-## Schema migrations
-
-App startup never applies PostgreSQL DDL. Versioned migrations are atomic, advisory-locked,
-checksum-verified and skipped on rerun. They add only the four application tables plus
-`excise_schema_migrations` metadata. Existing incompatible PostgreSQL tables cause rollback;
-they are never replaced. Identity IDs, case-insensitive username index, JSONB estimate fields,
-unconstrained NUMERIC totals and TIMESTAMPTZ timestamps preserve application behavior.
-The audit user ID intentionally has no foreign key so history survives account deletion.
-Failed login timestamps remain Unix epoch seconds for the existing lockout rules.
+## Migrations and existing main-branch databases
 
 ```powershell
-# Review files without contacting a database:
-uv run --no-project --python .venv/Scripts/python.exe flask --app run db-migrate
-# Only after approving writes to the configured destination:
-uv run --no-project --python .venv/Scripts/python.exe flask --app run db-migrate --confirm-write
-uv run --no-project --python .venv/Scripts/python.exe run.py
+uv run flask --app run db-migrate
+# Review migrations/*.sql and approve the destination before this write command:
+uv run flask --app run db-migrate --confirm-write
 ```
 
-`GET /api/health` returns the existing {"status":"ok"} after a SELECT 1, or sanitized
-HTTP 503 on failure. Readiness does not check every table: apply migrations before serving traffic.
+The first command is a file preview with no database connection. `init-db` remains as an alias
+with a no-write preview by default and --confirm-write required to apply.
+Application startup never applies DDL. Migrations are checksum-versioned, advisory-locked
+and atomic. 001_initial.sql creates a fresh legacy-compatible base. 002 adds current roles,
+session versions, protected Super Admin, JSONB, numeric totals, indexes and role access controls.
+An existing complete main-branch PostgreSQL schema is adopted by recording 001 as a baseline
+instead of recreating its tables, then applying 002. A partial/incompatible schema or invalid
+JSON fails and rolls back. Existing roles, password hashes, IDs and estimates are retained.
+Legacy is_admin administrators map to Admin; no existing user is automatically promoted to
+Super Admin. Old is_admin columns are retained. Existing schema_version metadata is retained.
 
-## Existing SQLite data
+Make a backup and rehearse on a copy before approving production migration. Do not run these
+commands against production until authorized. No remote schema migration was run by this task.
 
-Stop application writers and retain a backup of the original database (including a consistent
-SQLite backup if WAL is in use). The importer opens a read-only transaction and never changes
-SQLite. Specify the timezone of the old server because its timestamps used local wall time.
+## Account access and deployment
+
+Keep the newer main-branch permission model: User, Admin and one protected Super Admin.
+Session versions invalidate logins after password/status/role changes. There is no web /setup.
+An authorized operator, with separate production approval, may run:
 
 ```powershell
-uv run --no-project --python .venv/Scripts/python.exe flask --app run db-import-sqlite instance/users.db --source-timezone Asia/Karachi --dry-run
-# Requires explicit approval, including approval to import preserved production accounts:
-uv run --no-project --python .venv/Scripts/python.exe flask --app run db-import-sqlite instance/users.db --source-timezone Asia/Karachi --confirm-write
+uv run flask --app run create-superadmin USERNAME
+uv run flask --app run create-user USERNAME
+uv run flask --app run set-password USERNAME
 ```
 
-Import defaults to dry run; no destination connection is made. Writing requires an empty,
-already-migrated destination. IDs, hashes, ownership, logs and lockout rows are preserved.
-JSON and timestamps are converted, foreign keys and counts checked, and identity sequences
-restarted transactionally. A populated destination or conflict aborts the whole import;
-repeating a successful import fails safely rather than duplicating rows. No merge/overwrite
-mode exists. Reconcile an occupied destination separately with approval. Keep the source
-backup after migration. Never delete databases to recover passwords; use an authorized
-administrator's reset action or the existing terminal account-management workflow.
+Passwords are prompted, never command arguments. Existing protected Super Admin accounts
+survive migration. Signup can create normal Users only. Super Admin read-only access to other
+users' estimates remains guarded server-side; normal estimate queries retain owner filters.
 
-## Testing
+Vercel entrypoint/configuration and public/static assets from main are preserved. Configure
+production environment secrets in the hosting dashboard. Limit workers/concurrency to database
+capacity. Request-scoped connections close at teardown; single writes use autocommit and
+multi-statement estimate/import/migration operations use explicit transactions. Connection
+timeout is 10 seconds and query timeout 15 seconds. Session pooler suits persistent backends;
+review pooler capacity when using serverless hosting. Trust proxy headers only behind your
+configured trusted proxy. Test deployment readiness and authenticated flows before switching users.
+
+In Supabase, enforce SSL and appropriate network restrictions. Use a separate migration owner
+and least-privilege runtime login (schema USAGE, table DML, identity sequence USAGE/SELECT).
+Runtime needs no schema CREATE privileges or API service-role key. Migrations revoke private
+application table/sequence access from anon/authenticated roles. Direct SQL privileges can
+bypass RLS: Flask owns authorization; Supabase Auth-based RLS policies were not introduced.
+Keep these private tables unavailable to unauthenticated Data API clients.
+
+## SQLite import
+
+Retain a consistent backup and stop source writers during cutover. Source reads use a read-only
+SQLite transaction. The target must already be migrated and all four application tables empty.
 
 ```powershell
-uv run --no-project --python .venv/Scripts/python.exe pytest
-node --check frontend/static/js/estimator.js
+uv run flask --app run db-import-sqlite instance/users.db --source-timezone Asia/Karachi --dry-run
+# Only after approving preserved production-account import:
+uv run flask --app run db-import-sqlite instance/users.db --source-timezone Asia/Karachi --confirm-write
 ```
 
-Default tests always use temporary SQLite, even if DATABASE_URL points at production. Offline
-adapter tests exercise binding, TLS configuration, sanitized failures, rollback and conversion.
-They cannot prove live PostgreSQL connectivity or SQL execution. For full backend tests on a
-separate disposable LOCAL PostgreSQL database (name must end `_test`), privately configure
-TEST_DATABASE_URL, then:
+Default behavior is dry-run source validation without contacting a destination. --superadmin
+USERNAME explicitly promotes a selected existing active source admin during import; use it only
+with approval. Otherwise legacy admins remain Admin and staff become User. Existing IDs, hashes,
+logs, ownership, JSON and timestamps are preserved. Counts, foreign keys, and identity restart
+are verified in one atomic transaction. Occupied targets, conflicts and reruns fail safely;
+no merge, overwrite or deletion mode exists. Sequence restart is transactional.
+
+The old migrate-sqlite command is retained. It requires --superadmin and asks for the destination
+hostname before writing. Its --dry-run now validates the source only, without destination writes.
+It delegates actual copying to the same empty-destination importer. Schema creation is separate.
+Never delete databases for password recovery.
+
+## Tests and limitations
 
 ```powershell
-uv run --no-project --python .venv/Scripts/python.exe pytest --postgres
+uv run pytest
+node --check public/static/js/estimator.js
+# After configuring a local disposable TEST_DATABASE_URL whose database ends _test:
+uv run pytest --postgres
 ```
 
-This mode refuses remote hosts and creates a unique schema per fixture, applies migrations
-twice, runs application behavior through psycopg, then drops only that isolated test schema.
-The local test connection can omit TLS; production connections always require TLS.
-Never point tests at production. A localhost SSH tunnel to production is also prohibited.
+Default tests use a SQLite DB-API double to exercise Flask roles, sessions, CSRF, account actions,
+estimate privacy, production configuration and failure handling. They never use production
+DATABASE_URL. PostgreSQL-specific checks skip by default; the doubles cannot verify PostgreSQL
+SQL, JSONB constraints, concurrency or actual connectivity. Opt-in mode refuses remote hosts,
+creates a unique local schema per fixture, applies migrations twice, and drops only that schema
+at teardown. Never tunnel this localhost endpoint to production. Local test servers may omit TLS;
+production runtime code cannot. No production users are created by tests.
 
-## Troubleshooting
+GET /api/health executes SELECT 1, preserving {"status":"ok"}; failures yield sanitized 503.
+It does not validate all tables: apply migrations before serving traffic.
 
-- Missing DATABASE_URL: edit private .env or deployment environment; no SQLite fallback occurs.
-- DNS/IPv6 failures: use the dashboard's IPv4 Session Pooler URI.
-- Authentication failures: verify database password, pooler username including project suffix,
-  and URI encoding. Do not paste secrets into logs or support reports.
-- TLS failures: verify CA path/hostname for verify-full; do not disable SSL.
-- Missing tables: run the reviewed migration with the migration owner credentials.
-- Occupied destination: importer deliberately refuses to overwrite or merge data.
-- Password recovery: ask an existing authorized admin to reset the password. Preserve all data.
+Missing URL: set private environment variables. IPv6/DNS failure: use dashboard Session pooler.
+Authentication error: verify username/project suffix, password encoding and destination privately.
+TLS error: fix CA/hostname, never disable TLS. Missing tables: review/apply migrations with owner
+credentials. Populated import destination: reconcile separately with approval, never overwrite.
 
-References: [Supabase connections](https://supabase.com/docs/guides/database/connecting-to-postgres),
-[psycopg transactions](https://www.psycopg.org/psycopg3/docs/basic/transactions.html).
+References: [Supabase connections](https://supabase.com/docs/guides/database/connecting-to-postgres)
+and [psycopg transactions](https://www.psycopg.org/psycopg3/docs/basic/transactions.html).

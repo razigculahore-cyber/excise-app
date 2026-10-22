@@ -1,47 +1,71 @@
 import html
+import os
 import re
+import uuid
 
 import pytest
+from psycopg import sql
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from backend import create_app
+from backend.db import connect, init_db
+from backend.services import users
 
 
 def pytest_addoption(parser):
-    parser.addoption("--postgres", action="store_true", help="Run against isolated schemas on local TEST_DATABASE_URL ending in _test")
+    parser.addoption("--postgres", action="store_true", help="Use isolated local PostgreSQL test schemas")
+
+
+# This helper belongs to tests only. Runtime never accepts offline:// URLs.
+_real_connect = connect
+
+def connect(url, *args, **kwargs):
+    if url.startswith("offline://"):
+        from offline_db import OfflineDB
+        return OfflineDB(url.removeprefix("offline://"))
+    return _real_connect(url, *args, **kwargs)
 
 
 @pytest.fixture()
-def app(tmp_path, request, monkeypatch):
-    app = create_app({"TESTING": True, "SECRET_KEY": "test", "ALLOW_SIGNUP": True}, instance_dir=str(tmp_path))
+def database_url(tmp_path, request, monkeypatch):
+    import backend.db
+    monkeypatch.setattr(backend.db, "connect", connect)
+    monkeypatch.setattr("backend.migrate.connect", connect)
     if not request.config.getoption("--postgres"):
-        yield app
+        url = "offline://" + str(tmp_path / "test.sqlite")
+        with connect(url):
+            pass
+        yield url
         return
-    import os
-    import uuid
+    base = os.environ.get("TEST_DATABASE_URL", "")
+    info = conninfo_to_dict(base)
+    if info.get("host") not in ("localhost", "127.0.0.1", "::1") or not info.get("dbname", "").endswith("_test"):
+        pytest.fail("--postgres requires local TEST_DATABASE_URL with database name ending _test")
+    schema = "excise_test_" + uuid.uuid4().hex
+    # Local-only test server may omit TLS. Application runtime still enforces TLS.
     import psycopg
-    from psycopg import sql
-    from psycopg.conninfo import conninfo_to_dict
     from psycopg.rows import dict_row
     from backend.db import PostgresConnection
-    from backend.migrations import migrate
-    url = os.environ.get("TEST_DATABASE_URL", "")
-    options = conninfo_to_dict(url)
-    if options.get("host") not in ("localhost", "127.0.0.1", "::1") or not options.get("dbname", "").endswith("_test"):
-        pytest.fail("--postgres requires a local TEST_DATABASE_URL with database name ending _test")
-    schema = "excise_test_" + uuid.uuid4().hex
-    with psycopg.connect(url, autocommit=True, row_factory=dict_row) as control:
+    def local_connect(url, *args, **kwargs):
+        return PostgresConnection(psycopg.connect(url, autocommit=True, row_factory=dict_row))
+    monkeypatch.setattr(backend.db, "connect", local_connect)
+    monkeypatch.setattr("backend.migrate.connect", local_connect)
+    monkeypatch.setattr("backend.migrations.connect", local_connect)
+    with local_connect(base) as control:
         control.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
-        def test_connect(_url):
-            return PostgresConnection(psycopg.connect(url, options=f"-c search_path={schema} -c timezone=UTC", row_factory=dict_row))
-        monkeypatch.setattr("backend.db.connect", test_connect)
+        url = make_conninfo(base, options=f"-c search_path={schema} -c timezone=UTC")
         try:
-            with test_connect(url).raw as raw:
-                migrate(raw)
-                migrate(raw)
-            app.config["DATABASE_URL"] = url
-            yield app
+            init_db(url)
+            init_db(url)
+            yield url
         finally:
             control.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
+
+
+@pytest.fixture()
+def app(tmp_path, database_url):
+    return create_app({"TESTING": True, "SECRET_KEY": "test", "ALLOW_SIGNUP": True,
+                       "DATABASE_URL": database_url, "DATABASE_URL_UNPOOLED": database_url}, instance_dir=str(tmp_path))
 
 
 class Browser:
@@ -84,11 +108,31 @@ def make_browser(app):
 
 
 @pytest.fixture()
-def admin(browser):
-    """A fresh install with an admin 'boss' created and signed in."""
-    browser.post("/setup", {"username": "boss", "full_name": "The Boss", "password": "adminpass1", "confirm": "adminpass1"})
-    assert browser.login("boss", "adminpass1").status_code == 302
-    return browser
+def make_user(app):
+    """make_user("ali", role="admin") -> a Browser signed in as a new account with that role."""
+    def make(username: str, role: str = "user", password: str | None = None, login: bool = True) -> Browser:
+        password = password or f"{username}pass1"
+        with app.app_context():
+            if role == "superadmin":
+                users.create_superadmin(username, f"{username.title()} Person", password)
+            else:
+                users.create(username, f"{username.title()} Person", password, role=role)
+        b = Browser(app.test_client())
+        if login:
+            assert b.login(username, password).status_code == 302
+        return b
+    return make
+
+
+@pytest.fixture()
+def boss(make_user):
+    """The Super Admin 'boss' (password adminpass1), created as the terminal command does, signed in."""
+    return make_user("boss", role="superadmin", password="adminpass1")
+
+
+def uid_of(app, username: str) -> int:
+    with app.app_context():
+        return users.get_by_username(username)["id"]
 
 
 def flashes(resp) -> str:

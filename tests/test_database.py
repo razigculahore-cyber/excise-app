@@ -9,7 +9,7 @@ import psycopg
 import pytest
 
 from backend import create_app
-from backend.db import Cursor, DatabaseUnavailable, PostgresConnection, connect, get_db, init_db
+from backend.db import Cursor, DatabaseUnavailable, PostgresConnection, connect, get_db, init_sqlite as init_db
 from backend.migrations import read_source
 from backend.services import users
 from backend.services.estimates import _row_to_dict
@@ -18,7 +18,7 @@ from backend.services.estimates import _row_to_dict
 def test_missing_database_configuration(monkeypatch, tmp_path):
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv("DATABASE_BACKEND", "postgres")
-    with pytest.raises(RuntimeError, match="DATABASE_URL is required"):
+    with pytest.raises(RuntimeError, match="DATABASE_URL"):
         create_app(instance_dir=str(tmp_path))
 
 
@@ -53,8 +53,8 @@ def test_adapter_binds_values_and_rolls_back():
     raw.execute.side_effect = psycopg.OperationalError("offline")
     with pytest.raises(psycopg.OperationalError):
         db.execute("SELECT 1")
-    raw.rollback.assert_called_once()
     db.close()
+    raw.rollback.assert_called_once()
     raw.close.assert_called_once()
 
 
@@ -71,8 +71,12 @@ def test_postgres_timestamp_and_json_contract(app):
 def test_transaction_rollback(app):
     with app.app_context():
         db = get_db()
-        db.execute("INSERT INTO failed_logins(username,ip,at) VALUES (?,?,?)", ("x", "ip", 0))
-        db.rollback()
+        try:
+            with db.transaction():
+                db.execute("INSERT INTO failed_logins(username,ip,at) VALUES (?,?,?)", ("x", "ip", 0))
+                raise ValueError("rollback")
+        except ValueError:
+            pass
         assert db.execute("SELECT COUNT(*) FROM failed_logins").fetchone()[0] == 0
 
 
@@ -85,11 +89,8 @@ def test_duplicate_can_recover(app):
         assert users.create("another", "", "password123") > uid
 
 
-def test_setup_cannot_create_second_admin(app):
-    with app.app_context():
-        assert users.create_first_admin("first", "", "password123")
-        assert users.create_first_admin("second", "", "password123") is None
-        assert users.count() == 1
+def test_web_setup_cannot_create_an_admin(app):
+    assert app.test_client().get("/setup").status_code == 404
 
 
 def test_source_import_is_read_only_and_preserves_hash(tmp_path):
@@ -123,20 +124,24 @@ def test_cli_migration_preview_does_not_connect(app, monkeypatch):
 
 
 def test_cli_import_default_dry_run(app, monkeypatch):
+    from pathlib import Path
+    init_db(str(Path(app.instance_path) / "legacy.db"))
     monkeypatch.setattr("backend.migrations.connect", Mock(side_effect=AssertionError("must not connect")))
-    response = app.test_cli_runner().invoke(args=["db-import-sqlite", app.config["DATABASE"], "--source-timezone", "Asia/Karachi"])
+    response = app.test_cli_runner().invoke(args=["db-import-sqlite", str(__import__("pathlib").Path(app.instance_path) / "legacy.db"), "--source-timezone", "Asia/Karachi"])
     assert response.exit_code == 0
     assert "Dry run" in response.output
 
 
-def test_lockout_case_insensitive(admin):
+def test_lockout_case_insensitive(boss):
+    admin = boss
     admin.logout()
     for _ in range(5):
         admin.login("BOSS", "wrong-password")
     assert admin.login("boss", "adminpass1").status_code == 429
 
 
-def test_password_reset_and_activation(make_browser, admin):
+def test_password_reset_and_activation(make_browser, boss):
+    admin = boss
     admin.post("/admin/users/add", {"username": "staff", "password": "staffpass1"})
     from backend.services import users
     with admin.c.application.app_context():

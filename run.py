@@ -1,10 +1,10 @@
 """
 Start the Excise Fee Estimator.
 
-    python run.py                 -> http://127.0.0.1:5000 (this computer only)
-    HOST=0.0.0.0 python run.py    -> also reachable from the office network
+    uv run python run.py                 -> http://127.0.0.1:5000 (this computer only)
+    HOST=0.0.0.0 uv run python run.py    -> also reachable from the office network
 
-On first visit you'll be asked to create the admin account.
+Needs DATABASE_URL (see .env.example). On Vercel the same `app` is loaded through app.py.
 """
 import os
 

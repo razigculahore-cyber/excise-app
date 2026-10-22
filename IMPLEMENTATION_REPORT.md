@@ -1,105 +1,88 @@
-﻿# Implementation report: Supabase PostgreSQL integration
+﻿# Implementation and PR conflict-resolution report
 
-## Outcome and repository audit
+## Current result
 
-Work is on `feature/supabase-postgres`, created before file edits. The initial working tree
-was clean. No commits or pushes were made. Existing Flask architecture and fee calculator
-were retained; no frontend files changed.
+Merged origin/main (13901da) into feature/supabase-postgres locally, without creating a merge
+commit or pushing. All twelve conflicts were reconciled. The PR can be updated by committing
+and pushing this prepared merge. Main's newer application behavior is preserved alongside the
+Supabase persistence work. No production database/schema/users were accessed or changed.
 
-Inspected the repository skill, routes, authentication/session/CSRF guards, service queries,
-schema, configuration, tests and frontend persistence contracts. SQLite-specific behavior
-included question-mark placeholders, sqlite3.Row and IntegrityError, lastrowid, NOCASE,
-local datetime defaults, text JSON, PRAGMA and startup schema creation.
+## Preserved from main
 
-Read the existing instance/users.db in SQLite read-only mode before changing application
-files. All four tables existed with these counts: users 0, estimates 0, audit_log 0,
-failed_logins 0. The original database and secret_key were preserved. No production
-connection, schema changes, imports or user creation were attempted.
+- Super Admin/Admin/User permissions, server-side can() checks and Super Admin read-only dashboard.
+- Protected single Super Admin and terminal-only creation; no public /setup is reintroduced.
+- Password hashing, CSRF, session-version invalidation, lockout, secure cookie/HSTS settings,
+  production strong-key checks, request size limits and trusted-proxy configuration.
+- Vercel entrypoint/configuration and public/static assets, with the original calculator engine.
+- Python 3.12 project metadata and uv.lock environment management.
 
-## Created files
+## Supabase reconciliation
 
-- `.env.example`: private environment configuration template.
-- `backend/migrations.py`: explicit migration and safe SQLite import CLI commands.
-- `migrations/001_initial.sql`: four PostgreSQL tables, identity keys, constraints,
-  indexes, JSONB, numeric totals, UTC timestamps and Supabase API-role access revocation.
-- `requirements.lock`: dependency versions compiled with uv.
-- `tests/test_database.py`: adapter, configuration, security/failure and migration/import checks.
-- `SUPABASE_SETUP.md`: full setup, approval boundaries, operation and troubleshooting guide.
-- `IMPLEMENTATION_REPORT.md`: this report.
+- Mandatory TLS, timeouts, UTC storage and timezone/string/API conversion remain.
+- Runtime psycopg connections retain main's autocommit behavior for single statements;
+  explicit transaction() groups estimate-limit checks/saves, imports and schema changes.
+- Health checks query the database and return sanitized 503 errors on failure.
+- Signup defaults off. No browser database credentials or Supabase Auth replacement.
+- Explicit migrations with checksum/version metadata and advisory locking; no startup DDL.
+- New 002_roles_and_existing_postgres.sql upgrades the initial legacy-compatible schema and
+  adopts complete existing main-branch PostgreSQL databases without recreating their tables.
+  Existing roles, hashes and IDs remain; legacy admins map to Admin with no automatic Super
+  Admin promotion. Existing old columns/metadata are retained. JSON/NUMERIC conversion failures
+  roll back. Supabase anonymous/authenticated API roles lose access to private tables/sequences.
+- db-import-sqlite and existing migrate-sqlite share one atomic importer. Source-only dry runs
+  never connect to a destination. Writing requires explicit CLI confirmation, a migrated empty
+  destination, row/account verification and transactional identity restart. No overwrite mode.
 
-## Modified files
+## Main files changed during conflict resolution
 
-- `backend/db.py`: request-scoped psycopg adapter; TLS required, 10-second connection timeout,
-  15-second statement timeout, UTC session, bound parameters, explicit commit/rollback,
-  cleanup, safe connection errors; retained explicit local SQLite support.
-- `backend/config.py`: DATABASE_URL, explicit local backend selection, APP_TIMEZONE,
-  dotenv support, signup off by default; existing persistent secret fallback preserved.
-- `backend/__init__.py`: no automatic PostgreSQL schema writes, missing-URL validation,
-  isolated testing defaults, CLI registration and sanitized HTTP 503 responses.
-- `backend/services/users.py`: PostgreSQL insert IDs and duplicate handling, case-insensitive
-  lookups/lockout and serialized first-admin initialization.
-- `backend/services/estimates.py`: JSONB adaptation, numeric/API compatibility and owner-row
-  locking to serialize per-user save-limit enforcement.
-- `backend/routes/auth.py`: first-admin atomic recheck.
-- `backend/routes/admin.py`: serialize account mutation checks to retain an active admin.
-- `backend/routes/api.py`: database-backed health check while preserving success JSON.
-- `tests/conftest.py`: isolated defaults and opt-in local PostgreSQL test schemas.
-- `requirements.txt`, `.gitignore`, `README.md`, `.claude/skills/excise-app/SKILL.md`:
-  dependencies, secret exclusions and actual operational instructions.
+backend/__init__.py, config.py, db.py, migrate.py, migrations.py, routes/auth.py,
+routes/admin.py, services/users.py, services/estimates.py; migrations/002_roles_and_existing_postgres.sql;
+tests/conftest.py, offline_db.py, test_database.py, test_db.py, test_migration.py;
+pyproject.toml, uv.lock, requirements.txt, requirements.lock; .env.example, .gitignore,
+README.md, SUPABASE_SETUP.md and the repository SKILL.md.
+Main's other templates, role services, tests, public assets and Vercel files are included by merge.
 
-## Dependencies and verification
+## Verification
 
-Used uv with the existing virtual environment. New runtime dependencies: psycopg[binary]
-3.3.6, python-dotenv 1.2.4, tzdata 2026.5. Installed pytest 9.1.1 and its support packages.
-Existing Flask/Werkzeug authentication remains in use; no SQLAlchemy, Alembic or Supabase SDK.
+- Full offline suite: 115 passed, 5 skipped.
+- Skips require real PostgreSQL: schema execution/idempotency, full imports and checksum checks.
+- Existing calculator tests verify original engine hash and reference result 408190.
+- node --check public/static/js/estimator.js passed.
+- Ruff undefined-name/unused-import checks (select F) passed.
+- Both SQL migrations parsed with PostgreSQL's grammar through pglast; this validates syntax,
+  not live execution, PL/pgSQL behavior, data conversion or permissions.
+- No PostgreSQL service is available locally; no live Supabase connection was claimed.
 
-Offline pytest suite: **37 passed, 2 skipped**. Skips explicitly require local PostgreSQL
-for actual import/identity integrity and migration checksum validation. Existing auth,
-CSRF, role checks, private estimates and frontend/API tests pass. Additional checks cover
-TLS configuration, bound values, credential-safe failures, rollback, case-insensitive lockout,
-duplicate recovery, setup recheck, timestamp/JSON conversion, read-only source handling,
-CLI no-write defaults, password reset and activation.
+Tests used an isolated uv-managed .venv-merge on Python 3.12 because the original .venv uses
+Python 3.13 and was locked when uv tried to align it with main's Python 3.12 pin. Original
+interpreter dependencies were restored with uv pip sync. .venv-merge is ignored by Git.
+To reproduce with that environment in PowerShell:
 
-JavaScript syntax check passed. The unchanged calculator reference result is **408190**.
-Git diff whitespace check passed. No frontend diff exists.
+    $env:UV_PROJECT_ENVIRONMENT="$PWD\.venv-merge"
+    uv run pytest
 
-Actual PostgreSQL migrations, live transactions/imports and Supabase connectivity remain
-unverified. PostgreSQL binaries are absent and Docker's engine is not running. The opt-in
-`pytest --postgres` suite applies migrations twice in unique test schemas and runs backend
-behavior against psycopg. It requires a local disposable TEST_DATABASE_URL ending `_test`;
-it rejects remote hosts. See setup guide. Offline mocks do not substitute for these checks.
+Or close processes locking the old environment and use uv sync to align the normal .venv
+with the project's pinned Python. Neither environment is committed.
 
-## Schema, import and security review
+## Initial data preservation and remaining steps
 
-Version/checksum metadata is stored in excise_schema_migrations. Migrations are transactional,
-serialized by advisory lock and non-destructive. Existing incompatible tables fail closed.
-Application startup does not migrate PostgreSQL. Import opens SQLite read-only, requires an
-explicit source timezone, validates relationships, preserves IDs/hashes/data/logs, checks row
-counts and restarts identity sequences transactionally. It only writes to an empty migrated
-destination after --confirm-write. Conflicts/reruns abort without duplicates or overwrites.
+The initial read-only SQLite audit found users=0, estimates=0, audit_log=0, failed_logins=0.
+The original instance/users.db and secret_key remain untouched; no real data import is needed
+for that inspected empty source. No secrets are staged. All tests use temporary data.
 
-No credentials were printed or written to tracked files. DATABASE_URL is server-only; TLS
-cannot be disabled on runtime PostgreSQL connections. Flask authorization, Werkzeug hashing,
-CSRF, cookie configuration, ownership filtering and audit retention remain. No Supabase Auth
-or service-role API access was added. SQL API roles are denied application-table access;
-use a dedicated least-privilege runtime role and a separate owner for migrations. Direct SQL
-access is governed by Flask, not implicit Supabase RLS. Limit worker concurrency to database
-capacity. Protect /setup until the owner initializes the first admin.
+Configure DATABASE_URL, SECRET_KEY, HTTPS=1 in production, ALLOW_SIGNUP=0 and optional
+DATABASE_URL_UNPOOLED/APP_TIMEZONE privately. Obtain the URI from Supabase Connect, enforce
+SSL/network restrictions and use separate least-privilege runtime and migration roles.
+Rehearse schema upgrades and imports against a local disposable PostgreSQL database before
+approving production writes. pytest --postgres refuses remote hosts and requires the local
+database name to end _test, using only unique disposable schemas. Do not tunnel production.
 
-## Remaining setup and approval boundaries
+Review SUPABASE_SETUP.md for exact uv, migration, import, account and deployment commands.
+Production schema changes and user/import actions still require separate approval.
 
-Configure privately: DATABASE_URL, SECRET_KEY, HTTPS (1 for production), ALLOW_SIGNUP
-(normally 0); APP_TIMEZONE defaults to Asia/Karachi. No Supabase credentials were available
-in the environment, and no remote connection was attempted.
+Suggested merge commit:
 
-In Supabase Connect, obtain the Session Pooler URI for IPv4 (port 5432), or direct URI for
-supported networking. Configure TLS, network restrictions and dedicated runtime credentials.
-Review SQL and approve production schema writes before running db-migrate --confirm-write.
-Approve any production account import or first-admin creation separately. An import is not
-needed for the inspected empty database. Run live tests against a separate local PostgreSQL
-test database before deployment, then verify authorized deployment health/login/estimates.
+    git commit -m "Merge main and reconcile Supabase integration with roles"
+    git push origin feature/supabase-postgres
 
-Local commands, migration previews, import dry runs and deployment details are in
-SUPABASE_SETUP.md. Missing credentials do not prevent reviewing the completed code and SQL.
-All changes remain uncommitted. Suggested commit message:
-`Add Supabase PostgreSQL persistence and safe SQLite migration tooling`.
+No commit, push, GitHub PR edit, remote merge or production action was executed by the agent.

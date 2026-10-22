@@ -5,9 +5,12 @@ __pycache__/
 .pytest_cache/
 *.bak
 .env
+.env.*
+!.env.example
+.vercel/
+*.db
 
 .uv-cache/
 .env.*
 !.env.example
-*.db
-*.sqlite*
+.venv-merge/

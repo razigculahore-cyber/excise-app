@@ -1,61 +1,67 @@
 ﻿---
 name: excise-app
-description: Maintain the existing Flask Excise Fee Estimator, its session authentication, admin console, private estimates and browser fee engine.
+description: Maintain the Flask/Supabase PostgreSQL Excise Fee Estimator with Super Admin/Admin/User permissions, sessions, private estimates and the existing browser fee engine.
 ---
 
 # Excise Fee Estimator
 
-Read README.md and SUPABASE_SETUP.md for commands and deployment details.
-Use uv for environment and dependency management; preserve the existing application structure.
+Read README.md and SUPABASE_SETUP.md. Use uv and preserve the existing application.
+Python 3.12 is pinned; pyproject.toml and uv.lock are the dependency source of truth.
 
 ## Architecture
 
-- run.py starts the app; app.py is a compatibility shim.
-- backend/__init__.py builds the Flask app, registers security guards, CLI and safe errors.
-- backend/config.py loads .env without overriding environment values.
-- backend/db.py provides request-scoped psycopg connections with TLS, UTC, timeout,
-  bound values, rollback/cleanup and a small DB-API compatibility adapter.
-- PostgreSQL is selected by DATABASE_URL. Missing URL fails unless local DATABASE_BACKEND=sqlite
-  is explicitly selected. TESTING mode always isolates from production URLs.
-- backend/services contains user/password/lockout, estimate ownership and audit SQL.
-- backend/routes contains thin auth/main/admin/api blueprints.
-- backend/migrations.py owns explicit db-migrate and read-only-source db-import-sqlite commands.
-- migrations/*.sql are versioned, checksum-verified and applied in one advisory-locked transaction.
-- frontend/templates and static/css retain the current interface.
-- frontend/static/js/estimator.js is the unchanged browser fee engine.
-- tests use temporary SQLite by default; --postgres requires local TEST_DATABASE_URL ending _test.
+- run.py is the local entrypoint; app.py and vercel.json preserve Vercel deployment.
+- backend/__init__.py creates Flask, ProxyFix, CLI, security guards and safe error handlers.
+- config.py loads private .env without overriding environment; production requires a strong key.
+- db.py owns request-scoped psycopg connections with mandatory TLS, UTC, timeouts and cleanup.
+  Single statements autocommit; transaction() groups multi-statement work and owns rollback.
+- permissions.py owns role/can checks. security.py owns CSRF, CSP and session-version checks.
+- services/users.py preserves Werkzeug hashes, roles, account state and case-insensitive lockout.
+- services/estimates.py uses JSONB and numeric totals; normal queries filter by owner ID.
+- migrations.py and migrations/*.sql own explicit checksum/versioned transactional upgrades.
+  Existing complete main-branch PostgreSQL schemas are adopted without replacing tables.
+- migrate.py keeps the older migrate-sqlite command, delegating writes to the safe importer.
+- routes are thin; templates use guards to show controls, but permissions are enforced server-side.
+- frontend/templates are retained; public/static contains CSS, app.js and estimator.js for Vercel.
+- tests use an offline SQLite double by default. --postgres requires an isolated LOCAL test DB.
 
 ## Commands
 
 ```powershell
-uv venv .venv
-uv pip sync --python .venv/Scripts/python.exe requirements.lock
-uv run --no-project --python .venv/Scripts/python.exe pytest
-uv run --no-project --python .venv/Scripts/python.exe run.py
-node --check frontend/static/js/estimator.js
+uv sync
+uv run python run.py
+uv run pytest
+uv run pytest --postgres
+node --check public/static/js/estimator.js
 ```
 
-Copy .env.example privately to .env and configure DATABASE_URL, SECRET_KEY, HTTPS and ALLOW_SIGNUP.
-Never print credentials or put them in command-line arguments. See SUPABASE_SETUP.md for migration
-and import commands. Neither app startup nor migration previews write PostgreSQL schema.
-Write commands require --confirm-write and production approval. Never modify production users
-without approval. Do not commit or push automatically.
+Configure DATABASE_URL and SECRET_KEY privately. HTTPS=1 and APP_ENV=production for hosting;
+ALLOW_SIGNUP defaults 0. DATABASE_URL_UNPOOLED optionally selects a direct migration connection.
+No public /setup page exists. Only approved operators may run create-superadmin, create-user
+or set-password; passwords are prompted. Never modify production users without approval.
+
+`db-migrate` and `init-db` preview without writes; applying requires --confirm-write.
+`db-import-sqlite SOURCE --source-timezone ZONE` defaults to source-only validation and never
+contacts a destination without --confirm-write. --superadmin explicitly promotes a chosen
+existing active source admin. The old migrate-sqlite command confirms the destination host.
+Preserve all source files and require an empty migrated destination. Never reset databases.
 
 ## Invariants
 
-- Preserve Flask session auth and Werkzeug password hashes; do not switch to Supabase Auth.
-- Every state change requires CSRF. Keep CSP, secure-cookie options and server authorization.
-- Every estimate lookup/deletion filters by authenticated user_id.
-- Keep one active admin and disallow self-disable/delete. PostgreSQL account mutations lock
-  users to serialize last-admin checks; initial setup locks and rechecks before creating an admin.
-- Signup creates staff only and defaults off. Protect first-run setup until the owner completes it.
-- PostgreSQL uses identity IDs, case-insensitive username indexes, JSONB and UTC TIMESTAMPTZ.
-  Presentation uses APP_TIMEZONE and maintains the existing timestamp string contract.
-- failed_logins.at remains epoch seconds. Audit history intentionally survives deleted users.
-- PostgreSQL API roles anon/authenticated must not access private application tables.
-  Direct SQL authorization is enforced by Flask; do not assume Supabase RLS handles these sessions.
-- Keep .env, instance/, databases, secret_key and .venv out of Git.
-- Never delete/reset databases for password recovery. Preserve SQLite sources and import into
-  an empty PostgreSQL destination only after approval. Source timezone must be explicit.
-- Add new SQL as a new migration; never edit an already-applied migration.
-- Run backend tests and JS checks after changes. Calculator reference example remains 408190.
+- Preserve Flask sessions, Werkzeug hashes, CSRF, CSP, secure cookies and session invalidation.
+- User and Admin access follow permissions.can(); only Super Admin can read others' estimates.
+  Super Admin inspection pages are read-only. Ordinary queries always filter by user_id.
+- Exactly one Super Admin at most, enforced by unique index; deletion/demotion/disable is blocked.
+  No website or untrusted role field can create or grant Super Admin access.
+- Signup creates User only and is disabled by default.
+- Use bound values (%s) and psycopg.sql for identifiers. Never expose/log credentials or hashes.
+- UTC storage, APP_TIMEZONE presentation. Keep existing timestamp string/API number contracts.
+- Supabase anon/authenticated roles must not access these private application tables.
+  Direct SQL access control is enforced by Flask, not assumed Supabase Auth/RLS policies.
+- Add new migrations; never edit an already-applied migration or automatically migrate at startup.
+- Keep .env, instance/, database files, virtual environments and secret keys out of Git.
+- Never connect default tests to production. --postgres accepts local database names ending _test
+  and drops only unique test schemas; never use a production tunnel as that localhost endpoint.
+- Run tests and calculator checks after changes. Calculator reference remains 408190 and its
+  original file hash is checked by tests/test_calculator.py. Change fee rules only when requested.
+- No automatic commits or pushes. Production schema writes/account changes require approval.
